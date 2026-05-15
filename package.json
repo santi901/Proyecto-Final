@@ -9,7 +9,16 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
     "express": "^5.2.1",
     "socket.io": "^4.8.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/santi901/Proyecto-Final.git"
+  },
+  "bugs": {
+    "url": "https://github.com/santi901/Proyecto-Final/issues"
+  },
+  "homepage": "https://github.com/santi901/Proyecto-Final#readme"
 }
