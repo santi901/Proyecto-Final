@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   Pressable,
   ScrollView,
@@ -7,11 +8,46 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { supabase } from '../../supabaseClient';  // ← importa supabase
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [logueado, setLogueado] = useState(false);
   const [usuario, setUsuario] = useState('');
+  const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
+  const [error, setError] = useState('');
+
+  // ← PASO 4: test de conexión, lo podés borrar después
+  useEffect(() => {
+    async function testConexion() {
+      const { data, error } = await supabase.from('perfiles').select('*');
+      console.log('data:', data);
+      console.log('error:', error);
+    }
+    testConexion();
+  }, []);
+
+  async function handleLogin() {
+    setError('');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: pass,
+    });
+    if (error) {
+      setError(error.message);
+    } else {
+      setUsuario(data.user?.email || 'Empleador');
+      setLogueado(true);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setLogueado(false);
+    setEmail('');
+    setPass('');
+  }
 
   if (!logueado) {
     return (
@@ -21,34 +57,39 @@ export default function HomeScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Usuario"
+          placeholder="Email"
           placeholderTextColor="#94a3b8"
-          value={usuario}
-          onChangeText={setUsuario}
+          value={email}
+          onChangeText={setEmail}
           autoCapitalize="none"
+          keyboardType="email-address"
         />
         <TextInput
           style={styles.input}
-          placeholder="Contrasena"
+          placeholder="Contraseña"
           placeholderTextColor="#94a3b8"
           value={pass}
           onChangeText={setPass}
           secureTextEntry
         />
 
+        {error ? <Text style={styles.errorTxt}>{error}</Text> : null}
+
         <Pressable
-          style={({ pressed }) => [
-            styles.btnPrimario,
-            pressed && { opacity: 0.85 },
-          ]}
-          onPress={() => setLogueado(true)}>
+          style={({ pressed }) => [styles.btnPrimario, pressed && { opacity: 0.85 }]}
+          onPress={handleLogin}>
           <Text style={styles.btnPrimarioTxt}>Ingresar</Text>
         </Pressable>
 
-        <Text style={styles.helper}>
-          (Demo: cualquier dato te deja entrar)
-        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.btnSecundario, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push('/register')}>
+          <Text style={styles.btnSecundarioTxt}>Crear cuenta</Text>
+        </Pressable>
+
       </View>
+
+        
     );
   }
 
@@ -56,7 +97,7 @@ export default function HomeScreen() {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
       <View style={styles.header}>
         <Text style={styles.hola}>Hola,</Text>
-        <Text style={styles.nombreEmpresa}>{usuario || 'Empleador'}</Text>
+        <Text style={styles.nombreEmpresa}>{usuario}</Text>
       </View>
 
       <View style={styles.cardsRow}>
@@ -88,7 +129,7 @@ export default function HomeScreen() {
 
       <Pressable
         style={[styles.accion, { backgroundColor: '#e74c3c', marginTop: 24 }]}
-        onPress={() => setLogueado(false)}>
+        onPress={handleLogout}>
         <Text style={[styles.accionTxt, { color: '#fff' }]}>Cerrar sesion</Text>
       </Pressable>
     </ScrollView>
@@ -129,17 +170,31 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 8,
     alignItems: 'center',
+    },
+    btnSecundario: {
+  borderWidth: 1,
+  borderColor: '#fff',
+  borderRadius: 8,
+  paddingVertical: 14,
+  marginTop: 10,
+  alignItems: 'center',
   },
+btnSecundarioTxt: {
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: '600',
+  },
+  
   btnPrimarioTxt: {
     color: '#0a7ea4',
     fontSize: 16,
     fontWeight: 'bold',
   },
-  helper: {
-    color: '#e6f4fe',
+  errorTxt: {
+    color: '#fca5a5',
     textAlign: 'center',
-    marginTop: 16,
-    fontSize: 12,
+    marginBottom: 8,
+    fontSize: 13,
   },
   scroll: {
     flex: 1,
