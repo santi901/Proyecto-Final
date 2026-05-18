@@ -25,11 +25,11 @@ export default function RegisterScreen() {
     dni: '',
     codigo_postal: '',
     direccion: '',
-    piso_departamento: '',
-    indicaciones: '',
+    radio_busqueda: '',
   });
 
   const [fotoPerfil, setFotoPerfil] = useState<string | null>(null);
+  const [fotoDni, setFotoDni] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
@@ -37,7 +37,7 @@ export default function RegisterScreen() {
     setForm(prev => ({ ...prev, [campo]: valor }));
   }
 
-  async function seleccionarFoto() {
+  async function seleccionarFoto(tipo: 'perfil' | 'dni') {
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -45,30 +45,32 @@ export default function RegisterScreen() {
     });
 
     if (!resultado.canceled) {
-      setFotoPerfil(resultado.assets[0].uri);
+      if (tipo === 'perfil') setFotoPerfil(resultado.assets[0].uri);
+      else setFotoDni(resultado.assets[0].uri);
     }
   }
 
-  async function subirFoto(uri: string, userId: string) {
+  async function subirFoto(uri: string, bucket: string, userId: string) {
   const ext = uri.split('.').pop();
-  const fileName = `employer/${form.dni}.${ext}`;  // ← DNI en lugar de userId
+  const fileName = `employee/${form.dni}.${ext}`;  // ← DNI en lugar de userId
+
   const response = await fetch(uri);
   const blob = await response.blob();
 
   const { error } = await supabase.storage
-    .from('fotos-perfil')
+    .from(bucket)
     .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
 
   if (error) throw error;
 
-  const { data } = supabase.storage.from('fotos-perfil').getPublicUrl(fileName);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
   return data.publicUrl;
 }
 
   async function handleRegistro() {
     setError('');
 
-    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion) {
+    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion || !form.radio_busqueda) {
       setError('Completá todos los campos obligatorios.');
       return;
     }
@@ -105,16 +107,20 @@ export default function RegisterScreen() {
 
     const userId = data.user?.id!;
 
+    // Subir fotos si las seleccionaron
     let fotoPerfilUrl = null;
+    let fotoDniUrl = null;
+
     try {
-      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, userId);
+      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil', userId);
+      if (fotoDni) fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni', userId);
     } catch (e: any) {
-      setError('Error al subir la foto: ' + e.message);
+      setError('Error al subir las fotos: ' + e.message);
       setCargando(false);
       return;
     }
 
-    const { error: perfilError } = await supabase.from('perfiles').insert({
+    const { error: perfilError } = await supabase.from('empleados').insert({
       user_id: userId,
       nombre: form.nombre,
       apellido: form.apellido,
@@ -122,9 +128,9 @@ export default function RegisterScreen() {
       dni: form.dni,
       codigo_postal: form.codigo_postal,
       direccion: form.direccion,
-      piso_departamento: form.piso_departamento || null,
-      indicaciones: form.indicaciones || null,
+      radio_busqueda: parseFloat(form.radio_busqueda),
       foto_url: fotoPerfilUrl,
+      foto_dni_url: fotoDniUrl,
     });
 
     setCargando(false);
@@ -184,22 +190,22 @@ export default function RegisterScreen() {
       <TextInput style={styles.input} placeholder="Av. Corrientes 1234" placeholderTextColor="#94a3b8"
         value={form.direccion} onChangeText={v => actualizar('direccion', v)} />
 
-      <Text style={styles.label}>Piso / Departamento</Text>
-      <TextInput style={styles.input} placeholder="3° B (opcional)" placeholderTextColor="#94a3b8"
-        value={form.piso_departamento} onChangeText={v => actualizar('piso_departamento', v)} />
-
-      <Text style={styles.label}>Indicaciones</Text>
-      <TextInput style={[styles.input, styles.inputMulti]}
-        placeholder="Ej: timbre roto, usar escalera... (opcional)"
-        placeholderTextColor="#94a3b8" value={form.indicaciones}
-        onChangeText={v => actualizar('indicaciones', v)}
-        multiline numberOfLines={3} />
+      <Text style={styles.label}>Radio de búsqueda (km) *</Text>
+      <TextInput style={styles.input} placeholder="10" placeholderTextColor="#94a3b8"
+        value={form.radio_busqueda} onChangeText={v => actualizar('radio_busqueda', v)}
+        keyboardType="numeric" />
 
       <Text style={styles.label}>Foto de perfil</Text>
-      <Pressable style={styles.btnFoto} onPress={seleccionarFoto}>
+      <Pressable style={styles.btnFoto} onPress={() => seleccionarFoto('perfil')}>
         <Text style={styles.btnFotoTxt}>{fotoPerfil ? '✓ Foto seleccionada' : 'Seleccionar foto'}</Text>
       </Pressable>
       {fotoPerfil && <Image source={{ uri: fotoPerfil }} style={styles.preview} />}
+
+      <Text style={styles.label}>Foto del DNI</Text>
+      <Pressable style={styles.btnFoto} onPress={() => seleccionarFoto('dni')}>
+        <Text style={styles.btnFotoTxt}>{fotoDni ? '✓ Foto seleccionada' : 'Seleccionar foto del DNI'}</Text>
+      </Pressable>
+      {fotoDni && <Image source={{ uri: fotoDni }} style={styles.preview} />}
 
       {error ? <Text style={styles.errorTxt}>{error}</Text> : null}
 
@@ -234,7 +240,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  inputMulti: { height: 80, textAlignVertical: 'top' },
   btnFoto: {
     backgroundColor: '#e2e8f0',
     borderRadius: 8,
@@ -245,7 +250,7 @@ const styles = StyleSheet.create({
   btnFotoTxt: { color: '#0f172a', fontSize: 15 },
   preview: { width: '100%', height: 180, borderRadius: 8, marginBottom: 16 },
   btn: {
-    backgroundColor: '#0a7ea4',
+    backgroundColor: '#1d8348',
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
@@ -254,5 +259,5 @@ const styles = StyleSheet.create({
   btnTxt: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   errorTxt: { color: '#e74c3c', textAlign: 'center', marginBottom: 8, fontSize: 13 },
   linkContainer: { marginTop: 16, alignItems: 'center' },
-  link: { color: '#0a7ea4', fontSize: 14 },
+  link: { color: '#1d8348', fontSize: 14 },
 });
