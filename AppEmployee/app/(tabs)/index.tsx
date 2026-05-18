@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import React from 'react';
 import {
   Pressable,
   ScrollView,
@@ -7,12 +8,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { supabase } from '../../supabaseClient';
+import { useRouter } from 'expo-router';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [logueado, setLogueado] = useState(false);
   const [usuario, setUsuario] = useState('');
+  const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
-
+  const [error, setError] = useState('');
   const [fichado, setFichado] = useState(false);
   const [horaIngreso, setHoraIngreso] = useState<string | null>(null);
 
@@ -32,6 +37,27 @@ export default function HomeScreen() {
     setFichado(!fichado);
   };
 
+  async function handleLogin() {
+    setError('');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: pass,
+    });
+    if (error) {
+      setError(error.message);
+    } else {
+      setUsuario(data.user?.email || 'Empleado');
+      setLogueado(true);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setLogueado(false);
+    setEmail('');
+    setPass('');
+  }
+
   if (!logueado) {
     return (
       <View style={styles.loginContainer}>
@@ -40,31 +66,35 @@ export default function HomeScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Legajo o usuario"
+          placeholder="Email"
           placeholderTextColor="#94a3b8"
-          value={usuario}
-          onChangeText={setUsuario}
+          value={email}
+          onChangeText={setEmail}
           autoCapitalize="none"
+          keyboardType="email-address"
         />
         <TextInput
           style={styles.input}
-          placeholder="Contrasena"
+          placeholder="Contraseña"
           placeholderTextColor="#94a3b8"
           value={pass}
           onChangeText={setPass}
           secureTextEntry
         />
 
+        {error ? <Text style={styles.errorTxt}>{error}</Text> : null}
+
         <Pressable
-          style={({ pressed }) => [
-            styles.btnPrimario,
-            pressed && { opacity: 0.85 },
-          ]}
-          onPress={() => setLogueado(true)}>
+          style={({ pressed }) => [styles.btnPrimario, pressed && { opacity: 0.85 }]}
+          onPress={handleLogin}>
           <Text style={styles.btnPrimarioTxt}>Ingresar</Text>
         </Pressable>
 
-        <Text style={styles.helper}>(Demo: cualquier dato te deja entrar)</Text>
+        <Pressable
+          style={({ pressed }) => [styles.btnSecundario, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push('/register')}>
+          <Text style={styles.btnSecundarioTxt}>Crear cuenta</Text>
+        </Pressable>
       </View>
     );
   }
@@ -73,14 +103,10 @@ export default function HomeScreen() {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
       <View style={styles.header}>
         <Text style={styles.hola}>Hola,</Text>
-        <Text style={styles.nombre}>{usuario || 'Empleado'}</Text>
+        <Text style={styles.nombre}>{usuario}</Text>
       </View>
 
-      <View
-        style={[
-          styles.estadoBox,
-          { backgroundColor: fichado ? '#1d8348' : '#64748b' },
-        ]}>
+      <View style={[styles.estadoBox, { backgroundColor: fichado ? '#1d8348' : '#64748b' }]}>
         <Text style={styles.estadoLabel}>Estado actual</Text>
         <Text style={styles.estadoTxt}>
           {fichado ? `Trabajando desde ${horaIngreso}` : 'Fuera de turno'}
@@ -103,20 +129,8 @@ export default function HomeScreen() {
 
       <View style={styles.semanaRow}>
         {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d, i) => (
-          <View
-            key={i}
-            style={[
-              styles.diaBox,
-              i < 4 && styles.diaTrabajado,
-              i === 4 && styles.diaActual,
-            ]}>
-            <Text
-              style={[
-                styles.diaTxt,
-                (i < 4 || i === 4) && { color: '#fff' },
-              ]}>
-              {d}
-            </Text>
+          <View key={i} style={[styles.diaBox, i < 4 && styles.diaTrabajado, i === 4 && styles.diaActual]}>
+            <Text style={[styles.diaTxt, (i < 4 || i === 4) && { color: '#fff' }]}>{d}</Text>
           </View>
         ))}
       </View>
@@ -135,7 +149,7 @@ export default function HomeScreen() {
 
       <Pressable
         style={[styles.accion, { backgroundColor: '#e74c3c', marginTop: 24 }]}
-        onPress={() => setLogueado(false)}>
+        onPress={handleLogout}>
         <Text style={[styles.accionTxt, { color: '#fff' }]}>Cerrar sesion</Text>
       </Pressable>
     </ScrollView>
@@ -182,105 +196,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  helper: {
-    color: '#d4efdf',
-    textAlign: 'center',
-    marginTop: 16,
-    fontSize: 12,
-  },
-  scroll: {
-    flex: 1,
-    backgroundColor: '#f1f5f9',
-  },
-  scrollContent: {
-    padding: 16,
-    paddingTop: 60,
-  },
-  header: {
-    marginBottom: 20,
-  },
-  hola: {
-    fontSize: 16,
-    color: '#475569',
-  },
-  nombre: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  estadoBox: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  estadoLabel: {
-    color: '#fff',
-    fontSize: 12,
-    opacity: 0.85,
-  },
-  estadoTxt: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  btnFichar: {
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 28,
-  },
-  btnFicharTxt: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  seccion: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#475569',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-  },
-  semanaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  diaBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
+  btnSecundario: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 14,
+    marginTop: 10,
+    alignItems: 'center',
   },
-  diaTrabajado: {
-    backgroundColor: '#1d8348',
-    borderColor: '#1d8348',
-  },
-  diaActual: {
-    backgroundColor: '#0a7ea4',
-    borderColor: '#0a7ea4',
-  },
-  diaTxt: {
-    fontSize: 14,
-    color: '#475569',
+  btnSecundarioTxt: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
-  accion: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
+  errorTxt: {
+    color: '#fca5a5',
+    textAlign: 'center',
     marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    fontSize: 13,
   },
-  accionTxt: {
-    fontSize: 16,
-    color: '#0f172a',
-  },
+  scroll: { flex: 1, backgroundColor: '#f1f5f9' },
+  scrollContent: { padding: 16, paddingTop: 60 },
+  header: { marginBottom: 20 },
+  hola: { fontSize: 16, color: '#475569' },
+  nombre: { fontSize: 26, fontWeight: 'bold', color: '#0f172a' },
+  estadoBox: { borderRadius: 12, padding: 16, marginBottom: 12 },
+  estadoLabel: { color: '#fff', fontSize: 12, opacity: 0.85 },
+  estadoTxt: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: 4 },
+  btnFichar: { borderRadius: 12, padding: 20, alignItems: 'center', marginBottom: 28 },
+  btnFicharTxt: { color: '#fff', fontSize: 18, fontWeight: 'bold', letterSpacing: 1 },
+  seccion: { fontSize: 14, fontWeight: 'bold', color: '#475569', marginBottom: 12, textTransform: 'uppercase' },
+  semanaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
+  diaBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
+  diaTrabajado: { backgroundColor: '#1d8348', borderColor: '#1d8348' },
+  diaActual: { backgroundColor: '#0a7ea4', borderColor: '#0a7ea4' },
+  diaTxt: { fontSize: 14, color: '#475569', fontWeight: '600' },
+  accion: { backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  accionTxt: { fontSize: 16, color: '#0f172a' },
 });
