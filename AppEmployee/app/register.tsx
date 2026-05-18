@@ -100,7 +100,15 @@ if (
   return;
 }
   const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
-
+  if (!fotoPerfil) {
+    setError('La foto de perfil es obligatoria.');
+    return;
+  }
+  
+  if (!fotoDni) {
+    setError('La foto del DNI es obligatoria.');
+    return;
+  }
   setCargando(true);
 
   // 1 — Crear usuario en Auth
