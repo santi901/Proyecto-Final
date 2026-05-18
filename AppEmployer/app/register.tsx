@@ -66,76 +66,92 @@ export default function RegisterScreen() {
 }
 
   async function handleRegistro() {
-    setError('');
+  setError('');
 
-    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion) {
-      setError('Completá todos los campos obligatorios.');
-      return;
-    }
-
-    if (form.password !== form.password2) {
-      setError('Las contraseñas no coinciden.');
-      return;
-    }
-
-    if (form.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
-      return;
-    }
-
-    const partes = form.fecha_nacimiento.split('/');
-    if (partes.length !== 3) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
-      return;
-    }
-    const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
-
-    setCargando(true);
-
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setCargando(false);
-      return;
-    }
-
-    const userId = data.user?.id!;
-
-    let fotoPerfilUrl = null;
-    try {
-      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, userId);
-    } catch (e: any) {
-      setError('Error al subir la foto: ' + e.message);
-      setCargando(false);
-      return;
-    }
-
-    const { error: perfilError } = await supabase.from('perfiles').insert({
-      user_id: userId,
-      nombre: form.nombre,
-      apellido: form.apellido,
-      fecha_nacimiento: fechaFormateada,
-      dni: form.dni,
-      codigo_postal: form.codigo_postal,
-      direccion: form.direccion,
-      piso_departamento: form.piso_departamento || null,
-      indicaciones: form.indicaciones || null,
-      foto_url: fotoPerfilUrl,
-    });
-
-    setCargando(false);
-
-    if (perfilError) {
-      setError(perfilError.message);
-      return;
-    }
-
-    router.replace('/');
+  if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion) {
+    setError('Completá todos los campos obligatorios.');
+    return;
   }
+
+  if (form.password !== form.password2) {
+    setError('Las contraseñas no coinciden.');
+    return;
+  }
+
+  if (form.password.length < 6) {
+    setError('La contraseña debe tener al menos 6 caracteres.');
+    return;
+  }
+
+  const partes = form.fecha_nacimiento.split('/');
+if (
+  partes.length !== 3 ||
+  partes[0].length !== 2 ||
+  partes[1].length !== 2 ||
+  partes[2].length !== 4 ||
+  isNaN(Number(partes[0])) ||
+  isNaN(Number(partes[1])) ||
+  isNaN(Number(partes[2]))
+) {
+  setError('La fecha debe tener el formato DD/MM/AAAA.');
+  setCargando(false);
+  return;
+}
+  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+
+  setCargando(true);
+
+  // 1 — Crear usuario en Auth
+  const { data, error: authError } = await supabase.auth.signUp({
+    email: form.email,
+    password: form.password,
+  });
+
+  if (authError) {
+    setError(authError.message);
+    setCargando(false);
+    return;
+  }
+
+  const userId = data.user?.id!;
+
+  // 2 — Subir foto antes de guardar en la tabla
+  let fotoPerfilUrl = null;
+
+  try {
+    if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, userId);
+  } catch (e: any) {
+    await supabase.auth.signOut();
+    setError('Error al subir la foto: ' + e.message);
+    setCargando(false);
+    return;
+  }
+
+  // 3 — Guardar perfil en la tabla solo si la foto subió bien
+  const { error: perfilError } = await supabase.from('perfiles').insert({
+    user_id: userId,
+    nombre: form.nombre,
+    apellido: form.apellido,
+    fecha_nacimiento: fechaFormateada,
+    dni: form.dni,
+    codigo_postal: form.codigo_postal,
+    direccion: form.direccion,
+    piso_departamento: form.piso_departamento || null,
+    indicaciones: form.indicaciones || null,
+    foto_url: fotoPerfilUrl,
+  });
+
+  if (perfilError) {
+    await supabase.storage.from('fotos-perfil').remove([`employer/${form.dni}`]);
+    await supabase.auth.signOut();
+    setError(perfilError.message);
+    setCargando(false);
+    return;
+  }
+
+  setCargando(false);
+  router.replace('/');
+}
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
