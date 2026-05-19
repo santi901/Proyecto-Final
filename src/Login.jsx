@@ -18,7 +18,7 @@ export default function Login({ onLogin }) {
     else setError('Revisá tu email para confirmar el registro.')
   }
 
-  retrn (
+  return (
     <div>
       <input placeholder="Email" onChange={e => setEmail(e.target.value)} />
       <input placeholder="Contraseña" type="password" onChange={e => setPassword(e.target.value)} />
