@@ -1,4 +1,4 @@
-import { Controller, Post, UploadedFiles, UseInterceptors, Body } from '@nestjs/common';
+import { Controller, Post, UploadedFiles, UseInterceptors, Body, BadRequestException } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { VerificacionService } from './verificacion.service';
 import { StorageService } from './storage.service';
@@ -14,8 +14,11 @@ export class VerificacionController {
   @Post('comparar-caras')
   @UseInterceptors(FilesInterceptor('imagenes', 2))
   async compararCaras(@UploadedFiles() imagenes: any[], @Body('userId') userId: string) {
-    const [dni, selfie] = imagenes;
+   if (!imagenes || !Array.isArray(imagenes) || imagenes.length < 2) {
+      throw new BadRequestException('Tenés que enviar exactamente dos imágenes: la foto del DNI y una selfie.');
+    }
 
+    const [dni, selfie] = imagenes;
     const userId_ = userId ?? 'sin-id';
 
     const [rutaDni, rutaSelfie] = await Promise.all([
@@ -32,7 +35,7 @@ export class VerificacionController {
       coinciden: resultado.coinciden,
       similitud: resultado.similitud,
       estado: resultado.coinciden ? 'aprobado' : 'rechazado',
-      mensaje: resultado.coinciden ? 'Identidad verificada' : 'Las caras no coinciden',
+      mensaje: resultado.coinciden ? 'Identidad verificada' : 'Las caras no coinciden. La foto del DNI y la selfie deben ser de la misma persona.',
       archivos: {
         dni: rutaDni,
         selfie: rutaSelfie,

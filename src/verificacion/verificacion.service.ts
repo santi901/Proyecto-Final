@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { RekognitionClient, CompareFacesCommand } from '@aws-sdk/client-rekognition';
 
 @Injectable()
@@ -23,7 +23,16 @@ export class VerificacionService {
       SimilarityThreshold: 80,
     });
 
-    const respuesta = await this.rekognition.send(comando);
+    let respuesta;
+    try {
+      respuesta = await this.rekognition.send(comando);
+    } catch (error) {
+      if (error.name === 'InvalidParameterException' || error.__type === 'InvalidParameterException') {
+        throw new BadRequestException('No se detectó una cara en el DNI o en la selfie. Asegurate de que las fotos sean claras y muestren bien el rostro.');
+      }
+      throw new BadRequestException('Error al procesar las imágenes. Intentá de nuevo.');
+    }
+
     const coincidencias = respuesta.FaceMatches ?? [];
 
     if (coincidencias.length === 0) {
