@@ -85,33 +85,59 @@ export default function RegisterScreen() {
     return;
   }
 
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(form.email)) {
+    setError('El email no tiene un formato válido.');
+    return;
+  }
+
   const partes = form.fecha_nacimiento.split('/');
-if (
-  partes.length !== 3 ||
-  partes[0].length !== 2 ||
-  partes[1].length !== 2 ||
-  partes[2].length !== 4 ||
-  isNaN(Number(partes[0])) ||
-  isNaN(Number(partes[1])) ||
-  isNaN(Number(partes[2]))
-) {
-  setError('La fecha debe tener el formato DD/MM/AAAA.');
-  setCargando(false);
-  return;
-}
-  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+  if (
+    partes.length !== 3 ||
+    partes[0].length !== 2 ||
+    partes[1].length !== 2 ||
+    partes[2].length !== 4 ||
+    isNaN(Number(partes[0])) ||
+    isNaN(Number(partes[1])) ||
+    isNaN(Number(partes[2]))
+  ) {
+    setError('La fecha debe tener el formato DD/MM/AAAA.');
+    return;
+  }
+
+  if (form.dni.length < 7 || form.dni.length > 8) {
+    setError('El DNI debe tener entre 7 y 8 dígitos.');
+    return;
+  }
+
   if (!fotoPerfil) {
     setError('La foto de perfil es obligatoria.');
     return;
   }
-  
+
   if (!fotoDni) {
     setError('La foto del DNI es obligatoria.');
     return;
   }
+
+  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+
   setCargando(true);
 
-  // 1 — Crear usuario en Auth
+  // 1 — Verificar DNI duplicado
+  const { data: dniExistente } = await supabase
+    .from('empleados')
+    .select('id')
+    .eq('dni', form.dni)
+    .single();
+
+  if (dniExistente) {
+    setError('Ya existe un usuario registrado con ese DNI.');
+    setCargando(false);
+    return;
+  }
+
+  // 2 — Crear usuario en Auth para obtener el userId
   const { data, error: authError } = await supabase.auth.signUp({
     email: form.email,
     password: form.password,
@@ -125,23 +151,59 @@ if (
 
   const userId = data.user?.id!;
 
-  // 2 — Subir fotos antes de guardar en la tabla
+  // 3 — Verificar identidad con AWS Rekognition
+  try {
+    const formData = new FormData();
+
+    // Foto DNI
+    const responseDni = await fetch(fotoDni);
+    const blobDni = await responseDni.blob();
+    formData.append('imagenes', blobDni, `dni-${userId}.jpg`);
+
+    // Selfie / foto de perfil
+    const responseSelfie = await fetch(fotoPerfil);
+    const blobSelfie = await responseSelfie.blob();
+    formData.append('imagenes', blobSelfie, `selfie-${userId}.jpg`);
+
+    formData.append('userId', userId);
+
+    const verificacion = await fetch('http://localhost:3000/verificacion/comparar-caras', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const resultado = await verificacion.json();
+
+    if (resultado.estado !== 'aprobado') {
+      // Verificación rechazada — borrar usuario de Auth
+      await supabase.auth.signOut();
+      setError(`Verificación rechazada: las fotos no coinciden (similitud: ${resultado.similitud?.toFixed(1)}%)`);
+      setCargando(false);
+      return;
+    }
+
+  } catch (e: any) {
+    await supabase.auth.signOut();
+    setError('Error al verificar identidad: ' + e.message);
+    setCargando(false);
+    return;
+  }
+
+  // 4 — Subir fotos a Supabase Storage
   let fotoPerfilUrl = null;
   let fotoDniUrl = null;
 
   try {
-    if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil', userId);
-    if (fotoDni) fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni', userId);
+    fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil');
+    fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni');
   } catch (e: any) {
-    // Si falla la foto, borramos el usuario de Auth para no dejar datos huérfanos
-    await supabase.auth.admin.deleteUser(userId).catch(() => {});
     await supabase.auth.signOut();
     setError('Error al subir las fotos: ' + e.message);
     setCargando(false);
     return;
   }
 
-  // 3 — Guardar perfil en la tabla solo si las fotos subieron bien
+  // 5 — Guardar perfil en la tabla
   const { error: perfilError } = await supabase.from('empleados').insert({
     user_id: userId,
     nombre: form.nombre,
@@ -156,7 +218,6 @@ if (
   });
 
   if (perfilError) {
-    // Si falla el insert, borramos el usuario y las fotos subidas
     await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
     await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
     await supabase.auth.signOut();
