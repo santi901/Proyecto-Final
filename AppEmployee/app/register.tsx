@@ -126,16 +126,15 @@ export default function RegisterScreen() {
 
   // 1 — Verificar DNI duplicado
   const { data: dniExistente } = await supabase
-    .from('empleados')
-    .select('id')
-    .eq('dni', form.dni)
-    .single();
+  .from('empleados')
+  .select('id')
+  .eq('dni', form.dni);
 
-  if (dniExistente) {
-    setError('Ya existe un usuario registrado con ese DNI.');
-    setCargando(false);
-    return;
-  }
+if (dniExistente && dniExistente.length > 0) {
+  setError('Ya existe un usuario registrado con ese DNI.');
+  setCargando(false);
+  return;
+}
 
   // 2 — Crear usuario en Auth para obtener el userId
   const { data, error: authError } = await supabase.auth.signUp({
@@ -167,12 +166,13 @@ export default function RegisterScreen() {
 
     formData.append('userId', userId);
 
-    const verificacion = await fetch('http://localhost:3000/verificacion/comparar-caras', {
+    const verificacion = await fetch('http://10.9.93.33:3000/verificacion/comparar-caras', {
       method: 'POST',
       body: formData,
     });
 
     const resultado = await verificacion.json();
+    console.log('Resultado AWS:', resultado); // ← agregá esta línea
 
     if (resultado.estado !== 'aprobado') {
       // Verificación rechazada — borrar usuario de Auth
