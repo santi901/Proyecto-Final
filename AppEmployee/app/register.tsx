@@ -126,17 +126,51 @@ export default function RegisterScreen() {
 
   // 1 — Verificar DNI duplicado
   const { data: dniExistente } = await supabase
-  .from('empleados')
-  .select('id')
-  .eq('dni', form.dni);
+    .from('empleados')
+    .select('id')
+    .eq('dni', form.dni);
 
-if (dniExistente && dniExistente.length > 0) {
-  setError('Ya existe un usuario registrado con ese DNI.');
-  setCargando(false);
-  return;
-}
+  if (dniExistente && dniExistente.length > 0) {
+    setError('Ya existe un usuario registrado con ese DNI.');
+    setCargando(false);
+    return;
+  }
 
-  // 2 — Crear usuario en Auth para obtener el userId
+  // 2 — Verificar identidad con AWS ANTES de crear el usuario
+  try {
+    const formData = new FormData();
+
+    const responseDni = await fetch(fotoDni!);
+    const blobDni = await responseDni.blob();
+    formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
+
+    const responseSelfie = await fetch(fotoPerfil!);
+    const blobSelfie = await responseSelfie.blob();
+    formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
+
+    formData.append('userId', form.dni);
+
+    const verificacion = await fetch('https://platinum-plexiglas-humorless.ngrok-free.dev/verificacion/comparar-caras', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const resultado = await verificacion.json();
+    console.log('Resultado AWS:', resultado);
+
+    if (resultado.estado !== 'aprobado') {
+      setError(`Verificación rechazada: las fotos no coinciden (similitud: ${resultado.similitud?.toFixed(1)}%)`);
+      setCargando(false);
+      return;
+    }
+
+  } catch (e: any) {
+    setError('Error al verificar identidad: ' + e.message);
+    setCargando(false);
+    return;
+  }
+
+  // 3 — Recién acá crear usuario en Auth
   const { data, error: authError } = await supabase.auth.signUp({
     email: form.email,
     password: form.password,
@@ -150,52 +184,13 @@ if (dniExistente && dniExistente.length > 0) {
 
   const userId = data.user?.id!;
 
-  // 3 — Verificar identidad con AWS Rekognition
-  try {
-    const formData = new FormData();
-
-    // Foto DNI
-    const responseDni = await fetch(fotoDni);
-    const blobDni = await responseDni.blob();
-    formData.append('imagenes', blobDni, `dni-${userId}.jpg`);
-
-    // Selfie / foto de perfil
-    const responseSelfie = await fetch(fotoPerfil);
-    const blobSelfie = await responseSelfie.blob();
-    formData.append('imagenes', blobSelfie, `selfie-${userId}.jpg`);
-
-    formData.append('userId', userId);
-
-    const verificacion = await fetch('http://10.9.93.33:3000/verificacion/comparar-caras', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const resultado = await verificacion.json();
-    console.log('Resultado AWS:', resultado); // ← agregá esta línea
-
-    if (resultado.estado !== 'aprobado') {
-      // Verificación rechazada — borrar usuario de Auth
-      await supabase.auth.signOut();
-      setError(`Verificación rechazada: las fotos no coinciden (similitud: ${resultado.similitud?.toFixed(1)}%)`);
-      setCargando(false);
-      return;
-    }
-
-  } catch (e: any) {
-    await supabase.auth.signOut();
-    setError('Error al verificar identidad: ' + e.message);
-    setCargando(false);
-    return;
-  }
-
   // 4 — Subir fotos a Supabase Storage
   let fotoPerfilUrl = null;
   let fotoDniUrl = null;
 
   try {
-    fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil');
-    fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni');
+    fotoPerfilUrl = await subirFoto(fotoPerfil!, 'fotos-perfil');
+    fotoDniUrl = await subirFoto(fotoDni!, 'fotos-dni');
   } catch (e: any) {
     await supabase.auth.signOut();
     setError('Error al subir las fotos: ' + e.message);
@@ -203,7 +198,7 @@ if (dniExistente && dniExistente.length > 0) {
     return;
   }
 
-  // 5 — Guardar perfil en la tabla
+  // 5 — Guardar perfil
   const { error: perfilError } = await supabase.from('empleados').insert({
     user_id: userId,
     nombre: form.nombre,
