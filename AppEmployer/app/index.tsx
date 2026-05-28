@@ -110,23 +110,23 @@ export default function WelcomeScreen() {
       showsVerticalScrollIndicator={false}>
       <Marca />
 
-      <Text className="text-3xl font-bold text-white">Iniciá sesión</Text>
-      <Text className="text-[15px] text-[#94a3b8] mb-7">Ingresá con tu cuenta de empleador</Text>
+      <Text className="text-3xl font-bold text-white mb-7">
+        Iniciá sesión en{'\n'}
+        <Text className="text-[#FFD942]">ChanguitApp</Text> Employer
+      </Text>
 
-      <Text className="text-[13px] font-semibold text-[#cbd5e1] mb-1.5">Email</Text>
       <TextInput
         className="bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]"
-        placeholder="tu@email.com"
+        placeholder="Ingresá tu mail"
         placeholderTextColor="#64748b"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
         keyboardType="email-address"
       />
-      <Text className="text-[13px] font-semibold text-[#cbd5e1] mb-1.5">Contraseña</Text>
       <TextInput
         className="bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]"
-        placeholder="Tu contraseña"
+        placeholder="Ingresá tu contraseña"
         placeholderTextColor="#64748b"
         value={pass}
         onChangeText={setPass}
@@ -138,17 +138,28 @@ export default function WelcomeScreen() {
       <Pressable
         className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
         onPress={handleLogin}>
-        <Text className="text-[#1a1a1a] text-base font-extrabold">Ingresar</Text>
+        <Text className="text-[#1a1a1a] text-base font-extrabold">Iniciar sesión</Text>
       </Pressable>
 
-      <Pressable
-        className="rounded-xl py-4 items-center mt-3 border-[1.5px] border-[#FFD942] active:opacity-70"
-        onPress={() => router.push('/register')}>
-        <Text className="text-[#FFD942] text-base font-bold">Crear cuenta</Text>
+      <Pressable onPress={() => router.push('/register')} className="mt-5">
+        <Text className="text-sm text-[#94a3b8] text-center">
+          ¿No tenés una cuenta?{' '}
+          <Text className="text-[#FFD942] font-semibold">Creá una de forma gratis e inmediata</Text>
+        </Text>
+      </Pressable>
+
+      <Text className="text-[11px] text-[#64748b] text-center mt-5 leading-4">
+        Al iniciar sesión automáticamente aceptás nuestra{' '}
+        <Text className="underline">política de privacidad</Text> y{' '}
+        <Text className="underline">acuerdo de usuario</Text>
+      </Text>
+
+      <Pressable onPress={() => {}} className="mt-4">
+        <Text className="text-[#94a3b8] text-sm text-center underline">Ayuda</Text>
       </Pressable>
 
       <Pressable onPress={() => setMostrarLogin(false)}>
-        <Text className="text-[#94a3b8] text-sm text-center underline mt-5">Volver</Text>
+        <Text className="text-[#94a3b8] text-sm text-center underline mt-4">Volver</Text>
       </Pressable>
     </ScrollView>
   );
