@@ -121,23 +121,23 @@ export default function RegisterScreen() {
       return;
     }
 
-    const partes = form.fecha_nacimiento.split('/');
-    if (
-      partes.length !== 3 ||
-      partes[0].length !== 2 ||
-      partes[1].length !== 2 ||
-      partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
-    ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
-      setCargando(false);
-      return;
-    }
-    const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+  const partes = form.fecha_nacimiento.split('/');
+if (
+  partes.length !== 3 ||
+  partes[0].length !== 2 ||
+  partes[1].length !== 2 ||
+  partes[2].length !== 4 ||
+  isNaN(Number(partes[0])) ||
+  isNaN(Number(partes[1])) ||
+  isNaN(Number(partes[2]))
+) {
+  setError('La fecha debe tener el formato DD/MM/AAAA.');
+  setCargando(false);
+  return;
+}
+  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
 
-    setCargando(true);
+  setCargando(true);
 
     // 1 — Crear usuario en Auth
     const { data, error: authError } = await supabase.auth.signUp({

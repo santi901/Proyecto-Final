@@ -131,34 +131,34 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (form.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
-      return;
-    }
+  if (form.password.length < 6) {
+    setError('La contraseña debe tener al menos 6 caracteres.');
+    return;
+  }
 
-    const partes = form.fecha_nacimiento.split('/');
-    if (
-      partes.length !== 3 ||
-      partes[0].length !== 2 ||
-      partes[1].length !== 2 ||
-      partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
-    ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
-      setCargando(false);
-      return;
-    }
-    const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+  const partes = form.fecha_nacimiento.split('/');
+if (
+  partes.length !== 3 ||
+  partes[0].length !== 2 ||
+  partes[1].length !== 2 ||
+  partes[2].length !== 4 ||
+  isNaN(Number(partes[0])) ||
+  isNaN(Number(partes[1])) ||
+  isNaN(Number(partes[2]))
+) {
+  setError('La fecha debe tener el formato DD/MM/AAAA.');
+  setCargando(false);
+  return;
+}
+  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
 
     setCargando(true);
 
-    // 1 — Crear usuario en Auth
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    });
+  // 1 — Crear usuario en Auth
+  const { data, error: authError } = await supabase.auth.signUp({
+    email: form.email,
+    password: form.password,
+  });
 
     if (authError) {
       setError(authError.message);
@@ -168,45 +168,45 @@ export default function RegisterScreen() {
 
     const userId = data.user?.id!;
 
-    // 2 — Subir fotos antes de guardar en la tabla
-    let fotoPerfilUrl = null;
-    let fotoDniUrl = null;
+  // 2 — Subir fotos antes de guardar en la tabla
+  let fotoPerfilUrl = null;
+  let fotoDniUrl = null;
 
-    try {
-      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil', userId);
-      if (fotoDni) fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni', userId);
-    } catch (e: any) {
-      // Si falla la foto, borramos el usuario de Auth para no dejar datos huérfanos
-      await supabase.auth.admin.deleteUser(userId).catch(() => {});
-      await supabase.auth.signOut();
-      setError('Error al subir las fotos: ' + e.message);
-      setCargando(false);
-      return;
-    }
+  try {
+    if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil', userId);
+    if (fotoDni) fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni', userId);
+  } catch (e: any) {
+    // Si falla la foto, borramos el usuario de Auth para no dejar datos huérfanos
+    await supabase.auth.admin.deleteUser(userId).catch(() => {});
+    await supabase.auth.signOut();
+    setError('Error al subir las fotos: ' + e.message);
+    setCargando(false);
+    return;
+  }
 
-    // 3 — Guardar perfil en la tabla solo si las fotos subieron bien
-    const { error: perfilError } = await supabase.from('empleados').insert({
-      user_id: userId,
-      nombre: form.nombre,
-      apellido: form.apellido,
-      fecha_nacimiento: fechaFormateada,
-      dni: form.dni,
-      codigo_postal: form.codigo_postal,
-      direccion: form.direccion,
-      radio_busqueda: parseFloat(form.radio_busqueda),
-      foto_url: fotoPerfilUrl,
-      foto_dni_url: fotoDniUrl,
-    });
+  // 3 — Guardar perfil en la tabla solo si las fotos subieron bien
+  const { error: perfilError } = await supabase.from('empleados').insert({
+    user_id: userId,
+    nombre: form.nombre,
+    apellido: form.apellido,
+    fecha_nacimiento: fechaFormateada,
+    dni: form.dni,
+    codigo_postal: form.codigo_postal,
+    direccion: form.direccion,
+    radio_busqueda: parseFloat(form.radio_busqueda),
+    foto_url: fotoPerfilUrl,
+    foto_dni_url: fotoDniUrl,
+  });
 
-    if (perfilError) {
-      // Si falla el insert, borramos el usuario y las fotos subidas
-      await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
-      await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
-      await supabase.auth.signOut();
-      setError(perfilError.message);
-      setCargando(false);
-      return;
-    }
+  if (perfilError) {
+    // Si falla el insert, borramos el usuario y las fotos subidas
+    await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
+    await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
+    await supabase.auth.signOut();
+    setError(perfilError.message);
+    setCargando(false);
+    return;
+  }
 
     setCargando(false);
     router.replace('/buscar');
