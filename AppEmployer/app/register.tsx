@@ -188,7 +188,7 @@ export default function RegisterScreen() {
     }
 
     setCargando(false);
-    router.replace('/dashboard');
+    router.replace('/ofrecer');
   }
 
   const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
@@ -224,7 +224,9 @@ export default function RegisterScreen() {
 
           <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor="#64748b"
             value={form.email} onChangeText={v => actualizar('email', v)}
-            autoCapitalize="none" keyboardType="email-address" />
+            autoCapitalize="none" keyboardType="email-address"
+            autoComplete="off" textContentType="none" importantForAutofill="no"
+            autoCorrect={false} spellCheck={false} />
 
           <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor="#64748b"
             value={form.password} onChangeText={v => actualizar('password', v)} secureTextEntry />

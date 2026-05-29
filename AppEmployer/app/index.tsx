@@ -15,7 +15,7 @@ export default function WelcomeScreen() {
   // Si ya hay sesión activa, entra directo al panel
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/dashboard');
+      if (data.session) router.replace('/ofrecer');
     });
   }, [router]);
 
@@ -28,7 +28,7 @@ export default function WelcomeScreen() {
     if (error) {
       setError(error.message);
     } else {
-      router.replace('/dashboard');
+      router.replace('/ofrecer');
     }
   }
 
@@ -123,6 +123,11 @@ export default function WelcomeScreen() {
         onChangeText={setEmail}
         autoCapitalize="none"
         keyboardType="email-address"
+        autoComplete="off"
+        textContentType="none"
+        importantForAutofill="no"
+        autoCorrect={false}
+        spellCheck={false}
       />
       <TextInput
         className="bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]"

@@ -7,6 +7,7 @@ import {
   View,
   Image,
 } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../supabaseClient';
@@ -16,6 +17,7 @@ export default function RegisterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const [paso, setPaso] = useState<1 | 2 | 3>(1);
   const [form, setForm] = useState({
     nombre: '',
     apellido: '',
@@ -68,8 +70,56 @@ export default function RegisterScreen() {
     return data.publicUrl;
   }
 
+  // Valida el paso 1 (credenciales + datos personales) antes de avanzar
+  function irAlPaso2() {
+    setError('');
+
+    if (!form.email || !form.password || !form.password2 || !form.nombre || !form.apellido || !form.fecha_nacimiento || !form.dni) {
+      setError('Completá todos los campos obligatorios.');
+      return;
+    }
+    if (form.password !== form.password2) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+    if (form.password.length < 6) {
+      setError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    const partes = form.fecha_nacimiento.split('/');
+    if (
+      partes.length !== 3 ||
+      partes[0].length !== 2 ||
+      partes[1].length !== 2 ||
+      partes[2].length !== 4 ||
+      isNaN(Number(partes[0])) ||
+      isNaN(Number(partes[1])) ||
+      isNaN(Number(partes[2]))
+    ) {
+      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      return;
+    }
+    setPaso(2);
+  }
+
+  // Valida el paso 2 (ubicación) antes de pasar a las fotos
+  function irAlPaso3() {
+    setError('');
+    if (!form.codigo_postal || !form.direccion || !form.radio_busqueda) {
+      setError('Completá todos los campos obligatorios.');
+      return;
+    }
+    setPaso(3);
+  }
+
   async function handleRegistro() {
     setError('');
+
+    // La verificación de identidad necesita ambas fotos
+    if (!fotoPerfil || !fotoDni) {
+      setError('Subí tu foto de perfil y la foto del DNI para verificar tu identidad.');
+      return;
+    }
 
     if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion || !form.radio_busqueda) {
       setError('Completá todos los campos obligatorios.');
@@ -159,12 +209,10 @@ export default function RegisterScreen() {
     }
 
     setCargando(false);
-    router.replace('/dashboard');
+    router.replace('/buscar');
   }
 
   const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
-  const labelClass = 'text-[13px] font-semibold text-[#cbd5e1] mb-1.5';
-  const fotoBtnClass = 'bg-[#262626] rounded-[10px] py-3.5 items-center mb-2 border-[1.5px] border-[#FFD942] active:opacity-70';
 
   return (
     <ScrollView
@@ -183,86 +231,159 @@ export default function RegisterScreen() {
         <Text className="text-[13px] font-bold tracking-[2px] text-[#FFD942]">EMPLOYEE</Text>
       </View>
 
-      <Text className="text-3xl font-bold text-white mb-1">Creá tu cuenta</Text>
-      <Text className="text-sm text-[#94a3b8] mb-7">Completá tus datos para registrarte</Text>
+      {paso === 1 ? (
+        <>
+          <Text className="text-3xl font-bold text-white mb-1">
+            Creá tu cuenta en{'\n'}
+            <Text className="text-[#FFD942]">ChanguitApp</Text>
+          </Text>
+          <Pressable onPress={() => router.replace('/')} className="mb-7">
+            <Text className="text-sm text-[#94a3b8]">
+              ¿Ya tenés una cuenta? <Text className="text-[#FFD942] font-semibold">Iniciá sesión</Text>
+            </Text>
+          </Pressable>
 
-      <Text className={labelClass}>Nombre *</Text>
-      <TextInput className={inputClass} placeholder="Juan" placeholderTextColor="#64748b"
-        value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
+          <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor="#64748b"
+            value={form.email} onChangeText={v => actualizar('email', v)}
+            autoCapitalize="none" keyboardType="email-address"
+            autoComplete="off" textContentType="none" importantForAutofill="no"
+            autoCorrect={false} spellCheck={false} />
 
-      <Text className={labelClass}>Apellido *</Text>
-      <TextInput className={inputClass} placeholder="Pérez" placeholderTextColor="#64748b"
-        value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
+          <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor="#64748b"
+            value={form.password} onChangeText={v => actualizar('password', v)} secureTextEntry />
 
-      <Text className={labelClass}>Email *</Text>
-      <TextInput className={inputClass} placeholder="juan@email.com" placeholderTextColor="#64748b"
-        value={form.email} onChangeText={v => actualizar('email', v)}
-        autoCapitalize="none" keyboardType="email-address" />
+          <TextInput className={inputClass} placeholder="Volvé a ingresar tu contraseña" placeholderTextColor="#64748b"
+            value={form.password2} onChangeText={v => actualizar('password2', v)} secureTextEntry />
 
-      <Text className={labelClass}>Contraseña *</Text>
-      <TextInput className={inputClass} placeholder="Mínimo 6 caracteres" placeholderTextColor="#64748b"
-        value={form.password} onChangeText={v => actualizar('password', v)}
-        secureTextEntry />
+          <Text className="text-base font-bold text-white mt-2 mb-3">Datos personales</Text>
 
-      <Text className={labelClass}>Repetir contraseña *</Text>
-      <TextInput className={inputClass} placeholder="Repetí tu contraseña" placeholderTextColor="#64748b"
-        value={form.password2} onChangeText={v => actualizar('password2', v)}
-        secureTextEntry />
+          <TextInput className={inputClass} placeholder="Nombre/s" placeholderTextColor="#64748b"
+            value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
 
-      <Text className={labelClass}>Fecha de nacimiento * (DD/MM/AAAA)</Text>
-      <TextInput className={inputClass} placeholder="20/05/1990" placeholderTextColor="#64748b"
-        value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', v)}
-        keyboardType="numeric" />
+          <TextInput className={inputClass} placeholder="Apellido/s" placeholderTextColor="#64748b"
+            value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
-      <Text className={labelClass}>DNI *</Text>
-      <TextInput className={inputClass} placeholder="12345678" placeholderTextColor="#64748b"
-        value={form.dni} onChangeText={v => actualizar('dni', v)}
-        keyboardType="numeric" />
+          <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor="#64748b"
+            value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', v)}
+            keyboardType="numeric" />
 
-      <Text className={labelClass}>Código postal *</Text>
-      <TextInput className={inputClass} placeholder="1414" placeholderTextColor="#64748b"
-        value={form.codigo_postal} onChangeText={v => actualizar('codigo_postal', v)}
-        keyboardType="numeric" />
+          <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor="#64748b"
+            value={form.dni} onChangeText={v => actualizar('dni', v)}
+            keyboardType="numeric" />
 
-      <Text className={labelClass}>Dirección *</Text>
-      <TextInput className={inputClass} placeholder="Av. Corrientes 1234" placeholderTextColor="#64748b"
-        value={form.direccion} onChangeText={v => actualizar('direccion', v)} />
+          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
 
-      <Text className={labelClass}>Radio de búsqueda (km) *</Text>
-      <TextInput className={inputClass} placeholder="10" placeholderTextColor="#64748b"
-        value={form.radio_busqueda} onChangeText={v => actualizar('radio_busqueda', v)}
-        keyboardType="numeric" />
+          <Pressable
+            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            onPress={irAlPaso2}>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
+          </Pressable>
+        </>
+      ) : paso === 2 ? (
+        <>
+          <Text className="text-3xl font-bold text-white mb-1">Ya falta poco</Text>
+          <Text className="text-sm text-[#94a3b8] mb-7">
+            Te pedimos solo un poco más de paciencia
+          </Text>
 
-      <Text className={labelClass}>Foto de perfil</Text>
-      <Pressable className={fotoBtnClass} onPress={() => seleccionarFoto('perfil')}>
-        <Text className="text-[#FFD942] text-[15px] font-semibold">
-          {fotoPerfil ? '✓ Foto seleccionada' : 'Seleccionar foto'}
-        </Text>
-      </Pressable>
-      {fotoPerfil && <Image source={{ uri: fotoPerfil }} className="w-full h-44 rounded-[10px] mb-4" />}
+          <TextInput className={inputClass} placeholder="Ingresá tu código postal" placeholderTextColor="#64748b"
+            value={form.codigo_postal} onChangeText={v => actualizar('codigo_postal', v)}
+            keyboardType="numeric" />
 
-      <Text className={labelClass}>Foto del DNI</Text>
-      <Pressable className={fotoBtnClass} onPress={() => seleccionarFoto('dni')}>
-        <Text className="text-[#FFD942] text-[15px] font-semibold">
-          {fotoDni ? '✓ Foto seleccionada' : 'Seleccionar foto del DNI'}
-        </Text>
-      </Pressable>
-      {fotoDni && <Image source={{ uri: fotoDni }} className="w-full h-44 rounded-[10px] mb-4" />}
+          <TextInput className={inputClass} placeholder="Dirección personal" placeholderTextColor="#64748b"
+            value={form.direccion} onChangeText={v => actualizar('direccion', v)} />
 
-      {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          <View className="flex-row items-center bg-[#262626] rounded-[10px] px-4 mb-4 border border-[#3a3a3a]">
+            <TextInput className="flex-1 py-3.5 text-base text-white" placeholder="Radio de búsqueda"
+              placeholderTextColor="#64748b" value={form.radio_busqueda}
+              onChangeText={v => actualizar('radio_busqueda', v)} keyboardType="numeric" />
+            <Text className="text-[#94a3b8] text-base pl-3 border-l border-[#3a3a3a]">Km</Text>
+          </View>
 
-      <Pressable
-        className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
-        onPress={handleRegistro}
-        disabled={cargando}>
-        <Text className="text-[#1a1a1a] text-base font-extrabold">
-          {cargando ? 'Registrando...' : 'Crear cuenta'}
-        </Text>
-      </Pressable>
+          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
 
-      <Pressable onPress={() => router.replace('/')} className="mt-4 items-center">
-        <Text className="text-[#FFD942] text-sm font-semibold">¿Ya tenés cuenta? Iniciá sesión</Text>
-      </Pressable>
+          <Pressable
+            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            onPress={irAlPaso3}>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">Crear cuenta</Text>
+          </Pressable>
+
+          <Text className="text-[11px] text-[#64748b] text-center mt-4 leading-4">
+            Al crear una cuenta automáticamente aceptás nuestra{' '}
+            <Text className="underline">política de privacidad</Text> y{' '}
+            <Text className="underline">acuerdo de usuario</Text>
+          </Text>
+
+          <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
+            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+          </Pressable>
+        </>
+      ) : (
+        <>
+          <Text className="text-3xl font-bold text-white mb-1">Por último...</Text>
+          <Text className="text-sm text-[#94a3b8] mb-6">
+            Completá estos datos para terminar de configurar tu perfil
+          </Text>
+
+          {/* Foto de perfil */}
+          <Pressable
+            onPress={() => seleccionarFoto('perfil')}
+            className="flex-row items-center bg-[#262626] rounded-xl p-4 mb-3 border border-[#3a3a3a] active:opacity-70">
+            <View className="w-14 h-14 rounded-full bg-[#3a3a3a] items-center justify-center overflow-hidden">
+              {fotoPerfil ? (
+                <Image source={{ uri: fotoPerfil }} className="w-14 h-14" />
+              ) : (
+                <MaterialIcons name="person" size={30} color="#94a3b8" />
+              )}
+            </View>
+            <Text className="flex-1 text-[#cbd5e1] text-sm ml-3">
+              {fotoPerfil
+                ? '✓ Foto de perfil cargada'
+                : 'Subí tu foto de perfil para que podamos reconocerte mejor'}
+            </Text>
+          </Pressable>
+
+          {/* Foto del DNI */}
+          <Pressable
+            onPress={() => seleccionarFoto('dni')}
+            className="flex-row items-center bg-[#262626] rounded-xl p-4 mb-3 border border-[#3a3a3a] active:opacity-70">
+            <View className="w-14 h-14 rounded-lg bg-[#3a3a3a] items-center justify-center overflow-hidden">
+              {fotoDni ? (
+                <Image source={{ uri: fotoDni }} className="w-14 h-14" />
+              ) : (
+                <MaterialIcons name="badge" size={30} color="#94a3b8" />
+              )}
+            </View>
+            <Text className="flex-1 text-[#cbd5e1] text-sm ml-3">
+              {fotoDni
+                ? '✓ Foto del DNI cargada'
+                : 'Agregá una foto de tu DNI para verificar tu identidad'}
+            </Text>
+          </Pressable>
+
+          <View className="flex-row items-start bg-[#1f2937] rounded-lg p-3 mb-5">
+            <MaterialIcons name="verified-user" size={18} color="#FFD942" />
+            <Text className="flex-1 text-[#94a3b8] text-xs ml-2 leading-4">
+              Comparamos la foto de tu DNI con tu foto de perfil para confirmar que sos vos.
+            </Text>
+          </View>
+
+          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+
+          <Pressable
+            className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90"
+            onPress={handleRegistro}
+            disabled={cargando}>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">
+              {cargando ? 'Creando cuenta...' : 'Continuar a inicio'}
+            </Text>
+          </Pressable>
+
+          <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
+            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+          </Pressable>
+        </>
+      )}
     </ScrollView>
   );
 }

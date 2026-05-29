@@ -15,7 +15,7 @@ export default function WelcomeScreen() {
   // Si ya hay sesión activa, entra directo al panel
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/dashboard');
+      if (data.session) router.replace('/buscar');
     });
   }, [router]);
 
@@ -28,7 +28,7 @@ export default function WelcomeScreen() {
     if (error) {
       setError(error.message);
     } else {
-      router.replace('/dashboard');
+      router.replace('/buscar');
     }
   }
 
@@ -122,6 +122,11 @@ export default function WelcomeScreen() {
         onChangeText={setEmail}
         autoCapitalize="none"
         keyboardType="email-address"
+        autoComplete="off"
+        textContentType="none"
+        importantForAutofill="no"
+        autoCorrect={false}
+        spellCheck={false}
       />
       <Text className="text-[13px] font-semibold text-[#cbd5e1] mb-1.5">Contraseña</Text>
       <TextInput

@@ -1,39 +1,56 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Pressable, View } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const unstable_settings = {
-  initialRouteName: 'dashboard',
+  initialRouteName: 'buscar',
 };
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+// Barra inferior con un único ícono centrado
+function CenterTabBar({ navigation, state }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
+  const enPrincipal = state.routes[state.index]?.name === 'buscar';
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
+    <View
+      style={{
+        backgroundColor: '#ffffff',
+        borderTopWidth: 1,
+        borderTopColor: '#e2e8f0',
+        paddingTop: 8,
+        paddingBottom: insets.bottom + 8,
+        alignItems: 'center',
+        justifyContent: 'center',
       }}>
-      <Tabs.Screen
-        name="dashboard"
-        options={{
-          title: 'Inicio',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Recibos',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="doc.text.fill" color={color} />,
-        }}
-      />
+      <Pressable
+        onPress={() => navigation.navigate('buscar')}
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: enPrincipal ? '#FFD942' : '#f1f5f9',
+          borderWidth: enPrincipal ? 0 : 1,
+          borderColor: '#e2e8f0',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+        <MaterialIcons name="home" size={28} color={enPrincipal ? '#1a1a1a' : '#64748b'} />
+      </Pressable>
+    </View>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <Tabs
+      tabBar={(props) => <CenterTabBar {...props} />}
+      screenOptions={{ headerShown: false }}>
+      <Tabs.Screen name="buscar" />
+      <Tabs.Screen name="dashboard" />
+      <Tabs.Screen name="explore" />
     </Tabs>
   );
 }
