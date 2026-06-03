@@ -114,104 +114,153 @@ export default function RegisterScreen() {
 
   async function handleRegistro() {
     setError('');
-
-    // La verificación de identidad necesita ambas fotos
+  
+    // 1 — Validar fotos
     if (!fotoPerfil || !fotoDni) {
       setError('Subí tu foto de perfil y la foto del DNI para verificar tu identidad.');
       return;
     }
-
+  
+    // 2 — Validar campos
     if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion || !form.radio_busqueda) {
       setError('Completá todos los campos obligatorios.');
       return;
     }
-
+  
     if (form.password !== form.password2) {
       setError('Las contraseñas no coinciden.');
       return;
     }
-
-  if (form.password.length < 6) {
-    setError('La contraseña debe tener al menos 6 caracteres.');
-    return;
-  }
-
-  const partes = form.fecha_nacimiento.split('/');
-if (
-  partes.length !== 3 ||
-  partes[0].length !== 2 ||
-  partes[1].length !== 2 ||
-  partes[2].length !== 4 ||
-  isNaN(Number(partes[0])) ||
-  isNaN(Number(partes[1])) ||
-  isNaN(Number(partes[2]))
-) {
-  setError('La fecha debe tener el formato DD/MM/AAAA.');
-  setCargando(false);
-  return;
-}
-  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
-
+  
+    if (form.password.length < 6) {
+      setError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+  
+    const partes = form.fecha_nacimiento.split('/');
+    if (
+      partes.length !== 3 ||
+      partes[0].length !== 2 ||
+      partes[1].length !== 2 ||
+      partes[2].length !== 4 ||
+      isNaN(Number(partes[0])) ||
+      isNaN(Number(partes[1])) ||
+      isNaN(Number(partes[2]))
+    ) {
+      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      return;
+    }
+  
+    const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+  
     setCargando(true);
-
-  // 1 — Crear usuario en Auth
-  const { data, error: authError } = await supabase.auth.signUp({
-    email: form.email,
-    password: form.password,
-  });
-
+  
+    // 3 — Verificar DNI duplicado
+    const { data: dniExistente } = await supabase
+      .from('empleados')
+      .select('id')
+      .eq('dni', form.dni);
+  
+    if (dniExistente && dniExistente.length > 0) {
+      setError('Ya existe un usuario registrado con ese DNI.');
+      setCargando(false);
+      return;
+    }
+  
+    // 4 — Verificar identidad con AWS ANTES de crear el usuario
+    try {
+      const formData = new FormData();
+  
+      const responseDni = await fetch(fotoDni!);
+      const blobDni = await responseDni.blob();
+      formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
+  
+      const responseSelfie = await fetch(fotoPerfil!);
+      const blobSelfie = await responseSelfie.blob();
+      formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
+  
+      formData.append('userId', form.dni);
+  
+      const verificacion = await fetch('https://TU_URL.ngrok-free.app/verificacion/comparar-caras', {
+        method: 'POST',
+        body: formData,
+      });
+  
+      const resultado = await verificacion.json();
+      console.log('Resultado AWS:', resultado);
+  
+      if (resultado.estado !== 'aprobado') {
+        setError(`Verificación rechazada: las fotos no coinciden (similitud: ${resultado.similitud?.toFixed(1)}%)`);
+        setCargando(false);
+        return;
+      }
+  
+    } catch (e: any) {
+      setError('Error al verificar identidad: ' + e.message);
+      setCargando(false);
+      return;
+    }
+  
+    // 5 — Crear usuario en Auth
+    const { data, error: authError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+    });
+  
     if (authError) {
       setError(authError.message);
       setCargando(false);
       return;
     }
-
+  
     const userId = data.user?.id!;
-
-  // 2 — Subir fotos antes de guardar en la tabla
-  let fotoPerfilUrl = null;
-  let fotoDniUrl = null;
-
-  try {
-    if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil', userId);
-    if (fotoDni) fotoDniUrl = await subirFoto(fotoDni, 'fotos-dni', userId);
-  } catch (e: any) {
-    // Si falla la foto, borramos el usuario de Auth para no dejar datos huérfanos
-    await supabase.auth.admin.deleteUser(userId).catch(() => {});
-    await supabase.auth.signOut();
-    setError('Error al subir las fotos: ' + e.message);
-    setCargando(false);
-    return;
-  }
-
-  // 3 — Guardar perfil en la tabla solo si las fotos subieron bien
-  const { error: perfilError } = await supabase.from('empleados').insert({
-    user_id: userId,
-    nombre: form.nombre,
-    apellido: form.apellido,
-    fecha_nacimiento: fechaFormateada,
-    dni: form.dni,
-    codigo_postal: form.codigo_postal,
-    direccion: form.direccion,
-    radio_busqueda: parseFloat(form.radio_busqueda),
-    foto_url: fotoPerfilUrl,
-    foto_dni_url: fotoDniUrl,
-  });
-
-  if (perfilError) {
-    // Si falla el insert, borramos el usuario y las fotos subidas
-    await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
-    await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
-    await supabase.auth.signOut();
-    setError(perfilError.message);
-    setCargando(false);
-    return;
-  }
-
+  
+    // 6 — Subir fotos
+    let fotoPerfilUrl = null;
+    let fotoDniUrl = null;
+  
+    try {
+      fotoPerfilUrl = await subirFoto(fotoPerfil!, 'fotos-perfil', userId);
+      fotoDniUrl = await subirFoto(fotoDni!, 'fotos-dni', userId);
+    } catch (e: any) {
+      await supabase.auth.signOut();
+      setError('Error al subir las fotos: ' + e.message);
+      setCargando(false);
+      return;
+    }
+  
+    // 7 — Guardar perfil
+    const { error: perfilError } = await supabase.from('empleados').insert({
+      user_id: userId,
+      nombre: form.nombre,
+      apellido: form.apellido,
+      fecha_nacimiento: fechaFormateada,
+      dni: form.dni,
+      codigo_postal: form.codigo_postal,
+      direccion: form.direccion,
+      radio_busqueda: parseFloat(form.radio_busqueda),
+      foto_url: fotoPerfilUrl,
+      foto_dni_url: fotoDniUrl,
+    });
+  
+    if (perfilError) {
+      await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
+      await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
+      await supabase.auth.signOut();
+      setError(perfilError.message);
+      setCargando(false);
+      return;
+    }
+  
     setCargando(false);
     router.replace('/buscar');
   }
-
+  function formatearFecha(valor: string) {
+    const soloNumeros = valor.replace(/\D/g, '');
+    if (soloNumeros.length <= 2) return soloNumeros;
+    if (soloNumeros.length <= 4) return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2)}`;
+    return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
+  }
   const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
 
   return (
@@ -264,7 +313,7 @@ if (
             value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
           <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor="#64748b"
-            value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', v)}
+            value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', formatearFecha(v))}
             keyboardType="numeric" />
 
           <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor="#64748b"

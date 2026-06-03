@@ -106,11 +106,14 @@ export default function RegisterScreen() {
   async function handleRegistro() {
     setError('');
 
-    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion) {
+    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion || !form.piso_departamento) {
       setError('Completá todos los campos obligatorios.');
       return;
     }
-
+if (!fotoPerfil) {
+  setError('La foto de perfil es obligatoria.');
+  return;
+}
     if (form.password !== form.password2) {
       setError('Las contraseñas no coinciden.');
       return;
@@ -118,6 +121,10 @@ export default function RegisterScreen() {
 
     if (form.password.length < 6) {
       setError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    if (!fotoPerfil) {
+      setError('La foto de perfil es obligatoria.');
       return;
     }
 
@@ -190,7 +197,12 @@ if (
     setCargando(false);
     router.replace('/ofrecer');
   }
-
+  function formatearFecha(valor: string) {
+    const soloNumeros = valor.replace(/\D/g, '');
+    if (soloNumeros.length <= 2) return soloNumeros;
+    if (soloNumeros.length <= 4) return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2)}`;
+    return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
+  }
   const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
 
   return (
@@ -243,7 +255,7 @@ if (
             value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
           <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor="#64748b"
-            value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', v)}
+            value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', formatearFecha(v))}
             keyboardType="numeric" />
 
           <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor="#64748b"
