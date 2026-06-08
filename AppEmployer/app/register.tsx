@@ -195,7 +195,7 @@ if (
     }
 
     setCargando(false);
-    router.replace('/ofrecer');
+    router.replace('/(tabs)/ofrecer' as any);
   }
   function formatearFecha(valor: string) {
     const soloNumeros = valor.replace(/\D/g, '');

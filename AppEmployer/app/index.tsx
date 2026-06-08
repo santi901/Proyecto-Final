@@ -15,7 +15,7 @@ export default function WelcomeScreen() {
   // Si ya hay sesión activa, entra directo al panel
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/ofrecer');
+      if (data.session) router.replace('/(tabs)/ofrecer' as any);
     });
   }, [router]);
 
@@ -28,7 +28,7 @@ export default function WelcomeScreen() {
     if (error) {
       setError(error.message);
     } else {
-      router.replace('/ofrecer');
+      router.replace('/(tabs)/ofrecer' as any);
     }
   }
 

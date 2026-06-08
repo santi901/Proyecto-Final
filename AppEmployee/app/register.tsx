@@ -253,7 +253,7 @@ export default function RegisterScreen() {
     }
   
     setCargando(false);
-    router.replace('/buscar');
+    router.replace('/(tabs)/buscar' as any);
   }
   function formatearFecha(valor: string) {
     const soloNumeros = valor.replace(/\D/g, '');
