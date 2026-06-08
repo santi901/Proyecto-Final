@@ -2,6 +2,7 @@ import { Controller, Post, UploadedFiles, UseInterceptors, Body, BadRequestExcep
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { VerificacionService } from './verificacion.service';
 import { StorageService } from './storage.service';
+import { TextractService } from './textract.service';
 
 @Controller('verificacion')
 export class VerificacionController {
@@ -9,16 +10,24 @@ export class VerificacionController {
   constructor(
     private readonly verificacionService: VerificacionService,
     private readonly storageService: StorageService,
+    private readonly textractService: TextractService,
   ) {}
 
   @Post('comparar-caras')
   @UseInterceptors(FilesInterceptor('imagenes', 2))
   async compararCaras(@UploadedFiles() imagenes: any[], @Body('userId') userId: string) {
-   if (!imagenes || !Array.isArray(imagenes) || imagenes.length < 2) {
+    if (!imagenes || !Array.isArray(imagenes) || imagenes.length < 2) {
       throw new BadRequestException('Tenés que enviar exactamente dos imágenes: la foto del DNI y una selfie.');
     }
 
     const [dni, selfie] = imagenes;
+
+    if (dni.buffer.equals(selfie.buffer)) {
+      throw new BadRequestException('El DNI y la selfie no pueden ser la misma imagen.');
+    }
+
+    await this.textractService.validarDni(dni.buffer);
+
     const userId_ = userId ?? 'sin-id';
 
     const [rutaDni, rutaSelfie] = await Promise.all([
