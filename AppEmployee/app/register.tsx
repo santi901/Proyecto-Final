@@ -12,12 +12,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../supabaseClient';
 import { useRouter } from 'expo-router';
+import { WebView } from 'react-native-webview';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [paso, setPaso] = useState<1 | 2 | 3>(1);
+  const [coordenadas, setCoordenadas] = useState<{ lat: number; lng: number } | null>(null);
   const [form, setForm] = useState({
     nombre: '',
     apellido: '',
@@ -262,7 +264,26 @@ export default function RegisterScreen() {
     return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
   }
   const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
-
+  
+  async function buscarCoordenadas(direccion: string) {
+    if (direccion.length < 5) return;
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(direccion)}&format=json&limit=1&countrycodes=ar`,
+        { headers: { 'User-Agent': 'ChanguitApp/1.0 contacto@changuitapp.com' } }
+      );
+      const text = await response.text();
+      const data = JSON.parse(text);
+      if (data && data.length > 0) {
+        setCoordenadas({
+          lat: parseFloat(data[0].lat),
+          lng: parseFloat(data[0].lon),
+        });
+      }
+    } catch (e) {
+      console.log('Error geocodificando:', e);
+    }
+  }
   return (
     <ScrollView
       className="flex-1 bg-[#1a1a1a]"
@@ -340,14 +361,41 @@ export default function RegisterScreen() {
             keyboardType="numeric" />
 
           <TextInput className={inputClass} placeholder="Dirección personal" placeholderTextColor="#64748b"
-            value={form.direccion} onChangeText={v => actualizar('direccion', v)} />
+            value={form.direccion}
+            onChangeText={v => {
+              actualizar('direccion', v);
+              buscarCoordenadas(v);
+            }} />
 
-          <View className="flex-row items-center bg-[#262626] rounded-[10px] px-4 mb-4 border border-[#3a3a3a]">
-            <TextInput className="flex-1 py-3.5 text-base text-white" placeholder="Radio de búsqueda"
-              placeholderTextColor="#64748b" value={form.radio_busqueda}
-              onChangeText={v => actualizar('radio_busqueda', v)} keyboardType="numeric" />
-            <Text className="text-[#94a3b8] text-base pl-3 border-l border-[#3a3a3a]">Km</Text>
-          </View>
+          {coordenadas && (
+            <View style={{ height: 180, borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+              <WebView
+                source={{
+                  html: `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                      <meta name="viewport" content="width=device-width, initial-scale=1">
+                      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+                      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                      <style>html,body,#map{margin:0;padding:0;height:100%;width:100%;}</style>
+                    </head>
+                    <body>
+                      <div id="map"></div>
+                      <script>
+                        var map = L.map('map').setView([${coordenadas.lat}, ${coordenadas.lng}], 16);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                        L.marker([${coordenadas.lat}, ${coordenadas.lng}]).addTo(map);
+                      </script>
+                    </body>
+                    </html>
+                  `
+                }}
+                style={{ flex: 1 }}
+                scrollEnabled={false}
+              />
+            </View>
+          )}
 
           {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
 
