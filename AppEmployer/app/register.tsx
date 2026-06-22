@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
+  Animated,
   Pressable,
   ScrollView,
   Text,
@@ -7,6 +8,7 @@ import {
   View,
   Image,
 } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -19,8 +21,17 @@ export default function RegisterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [paso, setPaso] = useState<1 | 2>(1);
+  const [paso, setPaso] = useState<1 | 2 | 3>(1);
   const [coordenadas, setCoordenadas] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Animación de entrada de la pantalla de transición "Ya casi estamos"
+  const transAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (paso === 2) {
+      transAnim.setValue(0);
+      Animated.spring(transAnim, { toValue: 1, friction: 6, tension: 60, useNativeDriver: true }).start();
+    }
+  }, [paso, transAnim]);
   const [form, setForm] = useState({
     nombre: '',
     apellido: '',
@@ -283,6 +294,48 @@ if (
             <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
           </Pressable>
         </>
+      ) : paso === 2 ? (
+        <Animated.View
+          style={{
+            opacity: transAnim,
+            transform: [
+              { translateY: transAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+            ],
+          }}
+          className="items-center pt-6">
+          {/* Ícono celebratorio */}
+          <Animated.View
+            style={{
+              transform: [
+                { scale: transAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
+              ],
+            }}
+            className="w-28 h-28 rounded-full bg-[#FFD942] items-center justify-center mb-8">
+            <MaterialIcons name="celebration" size={56} color="#1a1a1a" />
+          </Animated.View>
+
+          <Text className="text-4xl font-black text-white text-center mb-3">
+            ¡Ya casi{'\n'}
+            <Text className="text-[#FFD942]">estamos!</Text>
+          </Text>
+
+          <Text className="text-base text-[#cbd5e1] text-center leading-6 mb-2 px-2">
+            Solo falta un paso más.
+          </Text>
+          <Text className="text-sm text-[#94a3b8] text-center leading-5 mb-10 px-2">
+            Vamos a cargar tu dirección para que los trabajadores sepan dónde es el trabajo.
+          </Text>
+
+          <Pressable
+            className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90"
+            onPress={() => setPaso(3)}>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">Continuar</Text>
+          </Pressable>
+
+          <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
+            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+          </Pressable>
+        </Animated.View>
       ) : (
         <>
           <Text className="text-3xl font-bold text-white mb-1">Ya falta poco</Text>
@@ -366,7 +419,7 @@ if (
             <Text className="underline">acuerdo de usuario</Text>
           </Text>
 
-          <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
+          <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
             <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
           </Pressable>
         </>

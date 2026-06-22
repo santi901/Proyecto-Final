@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
+  Linking,
   PanResponder,
   Pressable,
   ScrollView,
@@ -14,6 +16,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
+import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import MapaUbicacion from '../../components/mapa-ubicacion';
+
+type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.82);
@@ -34,14 +40,48 @@ export default function OfrecerTrabajoScreen() {
   const [categoria, setCategoria] = useState<number | null>(null);
   const [dificultad, setDificultad] = useState<typeof DIFICULTADES[number] | null>(null);
   const [usuario, setUsuario] = useState('');
+  const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
 
-  // Solo accesible con sesión activa
+  // ----- Ubicación -----
+  const [ubicEstado, setUbicEstado] = useState<EstadoUbicacion>('cargando');
+  const [coords, setCoords] = useState<Coordenadas | null>(null);
+  const [errorUbic, setErrorUbic] = useState('');
+
+  // Pide el permiso de ubicación. Si lo otorgan, obtiene las coordenadas, las muestra
+  // en el mapa y se las manda al backend. Si no, deja el estado en 'denegado' (bloquea el uso).
+  async function iniciarUbicacion(userId: string) {
+    setUbicEstado('cargando');
+    setErrorUbic('');
+
+    const r = await pedirUbicacion();
+
+    if (r.estado === 'ok') {
+      setCoords(r.coords);
+      setUbicEstado('ok');
+      // Mandar al backend de Nacho (no bloquea la UI si falla la red / el endpoint aún no existe)
+      enviarUbicacion(r.coords, userId).catch(e =>
+        console.log('No se pudo enviar la ubicación:', e?.message),
+      );
+    } else if (r.estado === 'denegado') {
+      setUbicEstado('denegado');
+    } else {
+      setErrorUbic(r.mensaje);
+      setUbicEstado('error');
+    }
+  }
+
+  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación.
   useEffect(() => {
+    let activo = true;
     getUsuario().then(u => {
+      if (!activo) return;
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleador');
+      setUsuarioId(u.id);
+      iniciarUbicacion(u.id);
     });
+    return () => { activo = false; };
   }, [router]);
 
   // ----- Panel de perfil (se desliza desde el costado) -----
@@ -88,9 +128,64 @@ export default function OfrecerTrabajoScreen() {
     })
   ).current;
 
+  // ----- Mientras se resuelve el permiso de ubicación -----
+  if (ubicEstado === 'cargando') {
+    return (
+      <View className="flex-1 bg-[#1a1a1a] items-center justify-center px-8">
+        <ActivityIndicator size="large" color="#FFD942" />
+        <Text className="text-white text-base font-semibold mt-4">Obteniendo tu ubicación…</Text>
+        <Text className="text-[#94a3b8] text-sm text-center mt-1">
+          La necesitamos para asociarla a los trabajos que publicás.
+        </Text>
+      </View>
+    );
+  }
+
+  // ----- Si no dan permiso (o falla el GPS), se bloquea el uso de la pantalla -----
+  if (ubicEstado === 'denegado' || ubicEstado === 'error') {
+    const denegado = ubicEstado === 'denegado';
+    return (
+      <View
+        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <View className="w-20 h-20 rounded-full bg-[#262626] items-center justify-center mb-5">
+          <MaterialIcons name="location-off" size={40} color="#FFD942" />
+        </View>
+        <Text className="text-white text-xl font-bold text-center mb-2">
+          {denegado ? 'Necesitamos tu ubicación' : 'No pudimos obtener tu ubicación'}
+        </Text>
+        <Text className="text-[#94a3b8] text-sm text-center mb-7 leading-5">
+          {denegado
+            ? 'ChanguitApp usa tu ubicación para mostrar en el mapa dónde estás y asociarla a los trabajos que publicás. Sin este permiso no podés ofrecer trabajos.'
+            : errorUbic || 'Revisá que el GPS esté activado e intentá de nuevo.'}
+        </Text>
+
+        <Pressable
+          onPress={() => iniciarUbicacion(usuarioId)}
+          className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90 mb-3">
+          <Text className="text-[#1a1a1a] text-base font-extrabold">Reintentar</Text>
+        </Pressable>
+
+        {denegado && (
+          <Pressable onPress={() => Linking.openSettings()} className="py-2 items-center">
+            <Text className="text-[#FFD942] text-sm font-semibold underline">
+              Abrir configuración del teléfono
+            </Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
+  // ----- Permiso OK: pantalla principal con el mapa de fondo -----
   return (
     <View className="flex-1 bg-[#e5e7eb]">
-      {/* Fondo del mapa: se deja vacío a propósito */}
+      {/* Fondo del mapa con la ubicación actual del empleador */}
+      {coords && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <MapaUbicacion lat={coords.lat} lng={coords.lng} />
+        </View>
+      )}
 
       {/* Barra superior de iconos (sobre el mapa) */}
       <View

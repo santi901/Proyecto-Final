@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
+  Animated,
   Pressable,
   ScrollView,
   Text,
@@ -20,8 +21,17 @@ export default function RegisterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [paso, setPaso] = useState<1 | 2 | 3>(1);
+  const [paso, setPaso] = useState<1 | 2 | 3 | 4>(1);
   const [coordenadas, setCoordenadas] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Animación de entrada de la pantalla de transición "Ya casi estamos"
+  const transAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (paso === 3) {
+      transAnim.setValue(0);
+      Animated.spring(transAnim, { toValue: 1, friction: 6, tension: 60, useNativeDriver: true }).start();
+    }
+  }, [paso, transAnim]);
   const [form, setForm] = useState({
     nombre: '',
     apellido: '',
@@ -109,7 +119,7 @@ export default function RegisterScreen() {
     setPaso(2);
   }
 
-  // Valida el paso 2 (ubicación) antes de pasar a las fotos
+  // Valida el paso 2 (ubicación) antes de pasar a la transición "Ya casi estamos"
   function irAlPaso3() {
     setError('');
     if (!form.codigo_postal || !form.direccion) {
@@ -396,19 +406,55 @@ export default function RegisterScreen() {
           <Pressable
             className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={irAlPaso3}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Crear cuenta</Text>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
           </Pressable>
-
-          <Text className="text-[11px] text-[#64748b] text-center mt-4 leading-4">
-            Al crear una cuenta automáticamente aceptás nuestra{' '}
-            <Text className="underline">política de privacidad</Text> y{' '}
-            <Text className="underline">acuerdo de usuario</Text>
-          </Text>
 
           <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
             <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
           </Pressable>
         </>
+      ) : paso === 3 ? (
+        <Animated.View
+          style={{
+            opacity: transAnim,
+            transform: [
+              { translateY: transAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+            ],
+          }}
+          className="items-center pt-6">
+          {/* Ícono celebratorio */}
+          <Animated.View
+            style={{
+              transform: [
+                { scale: transAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
+              ],
+            }}
+            className="w-28 h-28 rounded-full bg-[#FFD942] items-center justify-center mb-8">
+            <MaterialIcons name="verified-user" size={56} color="#1a1a1a" />
+          </Animated.View>
+
+          <Text className="text-4xl font-black text-white text-center mb-3">
+            ¡Ya casi{'\n'}
+            <Text className="text-[#FFD942]">estamos!</Text>
+          </Text>
+
+          <Text className="text-base text-[#cbd5e1] text-center leading-6 mb-2 px-2">
+            Solo nos falta verificar tu identidad.
+          </Text>
+          <Text className="text-sm text-[#94a3b8] text-center leading-5 mb-10 px-2">
+            En el último paso te vamos a pedir una foto de tu DNI y una selfie para confirmar que sos vos.
+          </Text>
+
+          <Pressable
+            className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90"
+            onPress={() => setPaso(4)}>
+            <Text className="text-[#1a1a1a] text-base font-extrabold">Continuar</Text>
+          </Pressable>
+
+          <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
+            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+          </Pressable>
+        </Animated.View>
       ) : (
         <>
           <Text className="text-3xl font-bold text-white mb-1">Por último...</Text>
@@ -470,7 +516,13 @@ export default function RegisterScreen() {
             </Text>
           </Pressable>
 
-          <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
+          <Text className="text-[11px] text-[#64748b] text-center mt-4 leading-4">
+            Al crear una cuenta automáticamente aceptás nuestra{' '}
+            <Text className="underline">política de privacidad</Text> y{' '}
+            <Text className="underline">acuerdo de usuario</Text>
+          </Text>
+
+          <Pressable onPress={() => { setError(''); setPaso(3); }} className="mt-4 items-center">
             <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
           </Pressable>
         </>
