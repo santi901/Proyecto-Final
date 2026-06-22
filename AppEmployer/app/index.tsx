@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { login, tieneSesion } from '../auth';
 
@@ -11,11 +11,14 @@ export default function WelcomeScreen() {
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [error, setError] = useState('');
+  const [verificandoSesion, setVerificandoSesion] = useState(true);
 
-  // Si ya hay sesión activa, entra directo al panel
+  // Persistencia de sesión: si ya hay sesión activa entra directo al panel;
+  // si no, recién ahí muestra la bienvenida (evita el parpadeo de la pantalla).
   useEffect(() => {
     tieneSesion().then(tiene => {
       if (tiene) router.replace('/(tabs)/ofrecer' as any);
+      else setVerificandoSesion(false);
     });
   }, [router]);
 
@@ -37,6 +40,15 @@ export default function WelcomeScreen() {
       <Text className="text-[13px] font-bold tracking-[2px] text-[#FFD942]">EMPLOYER</Text>
     </View>
   );
+
+  // Mientras se chequea si hay sesión guardada
+  if (verificandoSesion) {
+    return (
+      <View className="flex-1 bg-[#1a1a1a] items-center justify-center">
+        <ActivityIndicator size="large" color="#FFD942" />
+      </View>
+    );
+  }
 
   if (!mostrarLogin) {
     return (
