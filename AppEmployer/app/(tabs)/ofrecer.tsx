@@ -13,7 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../../supabaseClient';
+import { getUsuario, logout as authLogout } from '../../auth';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.82);
@@ -38,12 +38,9 @@ export default function OfrecerTrabajoScreen() {
 
   // Solo accesible con sesión activa
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) {
-        router.replace('/');
-        return;
-      }
-      setUsuario(data.user.email || 'Empleador');
+    getUsuario().then(u => {
+      if (!u) { router.replace('/'); return; }
+      setUsuario(u.email || 'Empleador');
     });
   }, [router]);
 
@@ -61,7 +58,7 @@ export default function OfrecerTrabajoScreen() {
   };
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    await authLogout();
     router.replace('/');
   }
 

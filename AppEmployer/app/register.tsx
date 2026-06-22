@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,7 +9,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { supabase } from '../supabaseClient';
+import * as FileSystem from 'expo-file-system/legacy';
+import { supabase } from '../supabaseClient'; // solo para Storage
+import { registrarEmpleador } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -36,6 +38,7 @@ export default function RegisterScreen() {
   const [fotoPerfil, setFotoPerfil] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
+  const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function actualizar(campo: string, valor: string) {
     setForm(prev => ({ ...prev, [campo]: valor }));
@@ -43,7 +46,7 @@ export default function RegisterScreen() {
 
   async function seleccionarFoto() {
     const resultado = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       quality: 0.7,
     });
@@ -53,11 +56,13 @@ export default function RegisterScreen() {
     }
   }
 
-  async function subirFoto(uri: string, userId: string) {
+  async function subirFoto(uri: string, _userId: string) {
     const ext = uri.split('.').pop();
     const fileName = `employer/${form.dni}.${ext}`;  // ← DNI en lugar de userId
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: 'base64',
+    });
+    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
 
     const { error } = await supabase.storage
       .from('fotos-perfil')
@@ -148,50 +153,39 @@ if (
 
   setCargando(true);
 
-    // 1 — Crear usuario en Auth
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setCargando(false);
-      return;
-    }
-
-    const userId = data.user?.id!;
-
-    // 2 — Subir foto antes de guardar en la tabla
+    // 1 — Subir foto a Supabase Storage
     let fotoPerfilUrl = null;
 
     try {
-      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, userId);
+      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, '');
     } catch (e: any) {
-      await supabase.auth.signOut();
       setError('Error al subir la foto: ' + e.message);
       setCargando(false);
       return;
     }
 
-    // 3 — Guardar perfil en la tabla solo si la foto subió bien
-    const { error: perfilError } = await supabase.from('perfiles').insert({
-      user_id: userId,
-      nombre: form.nombre,
-      apellido: form.apellido,
-      fecha_nacimiento: fechaFormateada,
-      dni: form.dni,
-      codigo_postal: form.codigo_postal,
-      direccion: form.direccion,
-      piso_departamento: form.piso_departamento || null,
-      indicaciones: form.indicaciones || null,
-      foto_url: fotoPerfilUrl,
-    });
-
-    if (perfilError) {
-      await supabase.storage.from('fotos-perfil').remove([`employer/${form.dni}`]);
-      await supabase.auth.signOut();
-      setError(perfilError.message);
+    // 2 — Registrar en el backend (crea usuario + perfil en perfiles)
+    try {
+      await registrarEmpleador({
+        email:             form.email,
+        password:          form.password,
+        nombre:            form.nombre,
+        apellido:          form.apellido,
+        fechaNacimiento:   fechaFormateada,
+        dni:               form.dni,
+        codigoPostal:      form.codigo_postal,
+        direccion:         form.direccion,
+        pisoDepartamento:  form.piso_departamento || null,
+        indicaciones:      form.indicaciones || null,
+        fotoUrl:           fotoPerfilUrl,
+        lat:               coordenadas?.lat ?? null,
+        lng:               coordenadas?.lng ?? null,
+      });
+    } catch (e: any) {
+      if (fotoPerfil) {
+        await supabase.storage.from('fotos-perfil').remove([`employer/${form.dni}`]);
+      }
+      setError(e.message || 'Error al crear la cuenta');
       setCargando(false);
       return;
     }
@@ -214,6 +208,7 @@ if (
         { headers: { 'User-Agent': 'ChanguitApp/1.0 contacto@changuitapp.com' } }
       );
       const text = await response.text();
+      if (!text.trimStart().startsWith('[')) return;
       const data = JSON.parse(text);
       if (data && data.length > 0) {
         setCoordenadas({
@@ -221,9 +216,7 @@ if (
           lng: parseFloat(data[0].lon),
         });
       }
-    } catch (e) {
-      console.log('Error geocodificando:', e);
-    }
+    } catch { }
   }
   return (
     <ScrollView
@@ -305,7 +298,8 @@ if (
             value={form.direccion}
             onChangeText={v => {
               actualizar('direccion', v);
-              buscarCoordenadas(v);
+              if (geocodeTimer.current) clearTimeout(geocodeTimer.current);
+              geocodeTimer.current = setTimeout(() => buscarCoordenadas(v), 600);
             }} />
 
           {coordenadas && (

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../../supabaseClient';
+import { getUsuario, logout as authLogout } from '../../auth';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -13,12 +13,9 @@ export default function DashboardScreen() {
 
   // Solo accesible con sesión activa; si no, vuelve a la bienvenida
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) {
-        router.replace('/');
-        return;
-      }
-      setUsuario(data.user.email || 'Empleado');
+    getUsuario().then(u => {
+      if (!u) { router.replace('/'); return; }
+      setUsuario(u.email || 'Empleado');
     });
   }, [router]);
 
@@ -39,7 +36,7 @@ export default function DashboardScreen() {
   };
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    await authLogout();
     router.replace('/');
   }
 

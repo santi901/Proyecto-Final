@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../supabaseClient';
+import { login, tieneSesion } from '../auth';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -14,21 +14,18 @@ export default function WelcomeScreen() {
 
   // Si ya hay sesión activa, entra directo al panel
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/buscar');
+    tieneSesion().then(tiene => {
+      if (tiene) router.replace('/buscar');
     });
   }, [router]);
 
   async function handleLogin() {
     setError('');
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: pass,
-    });
-    if (error) {
-      setError(error.message);
-    } else {
+    try {
+      await login(email, pass);
       router.replace('/buscar');
+    } catch (e: any) {
+      setError(e.message || 'Error al iniciar sesión');
     }
   }
 
