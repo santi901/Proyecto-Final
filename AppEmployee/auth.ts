@@ -6,7 +6,18 @@ const K = {
   ACCESS:  'cg_access_token',
   REFRESH: 'cg_refresh_token',
   USER:    'cg_usuario',
+  ONBOARDING: 'cg_onboarding_visto',
 };
+
+// ── Onboarding (pantallas de bienvenida) ───────────────────────────────────────
+
+export async function onboardingVisto(): Promise<boolean> {
+  return (await AsyncStorage.getItem(K.ONBOARDING)) === '1';
+}
+
+export async function marcarOnboardingVisto() {
+  await AsyncStorage.setItem(K.ONBOARDING, '1');
+}
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
 

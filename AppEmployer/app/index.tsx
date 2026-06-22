@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { login, tieneSesion } from '../auth';
+import { login, tieneSesion, onboardingVisto } from '../auth';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -13,13 +13,16 @@ export default function WelcomeScreen() {
   const [error, setError] = useState('');
   const [verificandoSesion, setVerificandoSesion] = useState(true);
 
-  // Persistencia de sesión: si ya hay sesión activa entra directo al panel;
-  // si no, recién ahí muestra la bienvenida (evita el parpadeo de la pantalla).
+  // Persistencia de sesión + onboarding:
+  // 1) si hay sesión activa entra directo al panel,
+  // 2) si es la primera vez, muestra el onboarding,
+  // 3) si no, muestra la bienvenida (sin parpadeo).
   useEffect(() => {
-    tieneSesion().then(tiene => {
-      if (tiene) router.replace('/(tabs)/ofrecer' as any);
-      else setVerificandoSesion(false);
-    });
+    (async () => {
+      if (await tieneSesion()) { router.replace('/(tabs)/ofrecer' as any); return; }
+      if (!(await onboardingVisto())) { router.replace('/onboarding' as any); return; }
+      setVerificandoSesion(false);
+    })();
   }, [router]);
 
   async function handleLogin() {
