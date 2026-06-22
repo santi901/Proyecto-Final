@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Pressable,
   ScrollView,
@@ -50,6 +51,11 @@ export default function RegisterScreen() {
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Estado del sistema de verificación de identidad de Ignacio:
+  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint /verificacion/comparar-caras
+  const [verifEstado, setVerifEstado] = useState<'procesando' | 'aprobado' | 'rechazado' | null>(null);
+  const [verifMensaje, setVerifMensaje] = useState('');
 
   function actualizar(campo: string, valor: string) {
     setForm(prev => ({ ...prev, [campo]: valor }));
@@ -185,6 +191,8 @@ export default function RegisterScreen() {
     }
   
     // 4 — Verificar identidad con AWS ANTES de crear el usuario
+    setVerifMensaje('');
+    setVerifEstado('procesando');
     try {
       const formData = new FormData();
   
@@ -207,13 +215,19 @@ export default function RegisterScreen() {
       console.log('Resultado AWS:', resultado);
   
       if (resultado.estado !== 'aprobado') {
-        setError(`Verificación rechazada: las fotos no coinciden (similitud: ${resultado.similitud?.toFixed(1)}%)`);
+        const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
+        setVerifMensaje(
+          resultado.mensaje ||
+            `Las fotos no coinciden${sim}. Asegurate de que la selfie y la foto del DNI sean de la misma persona.`,
+        );
+        setVerifEstado('rechazado');
         setCargando(false);
         return;
       }
-  
+
     } catch (e: any) {
-      setError('Error al verificar identidad: ' + e.message);
+      setVerifMensaje('No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.');
+      setVerifEstado('rechazado');
       setCargando(false);
       return;
     }
@@ -226,6 +240,7 @@ export default function RegisterScreen() {
       fotoPerfilUrl = await subirFoto(fotoPerfil!, 'fotos-perfil', '');
       fotoDniUrl    = await subirFoto(fotoDni!,    'fotos-dni',    '');
     } catch (e: any) {
+      setVerifEstado(null);
       setError('Error al subir las fotos: ' + e.message);
       setCargando(false);
       return;
@@ -252,13 +267,16 @@ export default function RegisterScreen() {
       // Limpiar fotos si el backend falla
       await supabase.storage.from('fotos-perfil').remove([`employee/${form.dni}`]);
       await supabase.storage.from('fotos-dni').remove([`employee/${form.dni}`]);
+      setVerifEstado(null);
       setError(e.message || 'Error al crear la cuenta');
       setCargando(false);
       return;
     }
 
+    // Identidad verificada y cuenta creada: pantalla de aprobado y entrada a la app
     setCargando(false);
-    router.replace('/(tabs)/buscar' as any);
+    setVerifEstado('aprobado');
+    setTimeout(() => router.replace('/(tabs)/buscar' as any), 1300);
   }
   function formatearFecha(valor: string) {
     const soloNumeros = valor.replace(/\D/g, '');
@@ -287,6 +305,54 @@ export default function RegisterScreen() {
       console.log('Error geocodificando:', e);
     }
   }
+  // ----- Pantallas de feedback de verificación de identidad (sistema de estados de Ignacio) -----
+  if (verifEstado) {
+    return (
+      <View
+        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        {verifEstado === 'procesando' && (
+          <>
+            <ActivityIndicator size="large" color="#FFD942" />
+            <Text className="text-white text-xl font-bold text-center mt-6 mb-2">
+              Verificando tu identidad…
+            </Text>
+            <Text className="text-[#94a3b8] text-sm text-center leading-5">
+              Estamos comparando la foto de tu DNI con tu selfie. Esto puede tardar unos segundos.
+            </Text>
+          </>
+        )}
+
+        {verifEstado === 'aprobado' && (
+          <>
+            <View className="w-24 h-24 rounded-full bg-[#1d8348] items-center justify-center mb-6">
+              <MaterialIcons name="check" size={56} color="#ffffff" />
+            </View>
+            <Text className="text-white text-2xl font-black text-center mb-2">¡Identidad verificada!</Text>
+            <Text className="text-[#94a3b8] text-sm text-center leading-5">
+              Listo, confirmamos que sos vos. Te estamos llevando a la app…
+            </Text>
+          </>
+        )}
+
+        {verifEstado === 'rechazado' && (
+          <>
+            <View className="w-24 h-24 rounded-full bg-[#e74c3c] items-center justify-center mb-6">
+              <MaterialIcons name="close" size={56} color="#ffffff" />
+            </View>
+            <Text className="text-white text-2xl font-black text-center mb-2">No pudimos verificarte</Text>
+            <Text className="text-[#94a3b8] text-sm text-center leading-5 mb-8">{verifMensaje}</Text>
+            <Pressable
+              onPress={() => { setVerifEstado(null); setError(''); }}
+              className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90">
+              <Text className="text-[#1a1a1a] text-base font-extrabold">Reintentar</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       className="flex-1 bg-[#1a1a1a]"
