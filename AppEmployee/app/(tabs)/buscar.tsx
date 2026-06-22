@@ -35,6 +35,7 @@ export default function BuscarTrabajoScreen() {
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
+  const [accesoBloqueado, setAccesoBloqueado] = useState(false);
 
   // ----- Ubicación -----
   const [ubicEstado, setUbicEstado] = useState<EstadoUbicacion>('cargando');
@@ -72,6 +73,8 @@ export default function BuscarTrabajoScreen() {
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleado');
       setUsuarioId(u.id);
+      // Bloquear acceso si la identidad todavía no está verificada
+      if (u.verificado === false) { setAccesoBloqueado(true); return; }
       iniciarUbicacion(u.id);
     });
     return () => { activo = false; };
@@ -120,6 +123,28 @@ export default function BuscarTrabajoScreen() {
       },
     })
   ).current;
+
+  // ----- Acceso bloqueado: la identidad no está verificada -----
+  if (accesoBloqueado) {
+    return (
+      <View
+        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <View className="w-20 h-20 rounded-full bg-[#262626] items-center justify-center mb-5">
+          <MaterialIcons name="gpp-maybe" size={42} color="#FFD942" />
+        </View>
+        <Text className="text-white text-xl font-bold text-center mb-2">Tu cuenta no está verificada</Text>
+        <Text className="text-[#94a3b8] text-sm text-center mb-7 leading-5">
+          Para usar ChanguitApp necesitás verificar tu identidad con tu DNI y una selfie. Todavía no pudimos confirmarla.
+        </Text>
+        <Pressable
+          onPress={handleLogout}
+          className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90">
+          <Text className="text-[#1a1a1a] text-base font-extrabold">Cerrar sesión</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   // ----- Mientras se resuelve el permiso de ubicación -----
   if (ubicEstado === 'cargando') {

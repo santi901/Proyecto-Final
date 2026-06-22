@@ -13,7 +13,7 @@ const K = {
 export async function guardarSesion(data: {
   accessToken: string;
   refreshToken: string;
-  usuario: { id: string; email: string; tipo: string };
+  usuario: { id: string; email: string; tipo: string; verificado?: boolean };
 }) {
   await AsyncStorage.multiSet([
     [K.ACCESS,  data.accessToken],
@@ -26,7 +26,7 @@ export async function getAccessToken(): Promise<string | null> {
   return AsyncStorage.getItem(K.ACCESS);
 }
 
-export async function getUsuario(): Promise<{ id: string; email: string; tipo: string } | null> {
+export async function getUsuario(): Promise<{ id: string; email: string; tipo: string; verificado?: boolean } | null> {
   const raw = await AsyncStorage.getItem(K.USER);
   return raw ? JSON.parse(raw) : null;
 }
