@@ -1,5 +1,11 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { calcularDistanciaKm } from './haversine.util';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!,
+);
 
 const PRECIO_NAFTA_ARS = 2070;
 const RENDIMIENTO_KM_POR_LITRO = 13;
@@ -65,6 +71,36 @@ export class LocationService {
 
     return {
       distanciaKm: parseFloat(distanciaKm.toFixed(2)),
+      nafta: {
+        litros: parseFloat(litros.toFixed(3)),
+        costoARS: Math.round(costoARS),
+      },
+    };
+  }
+
+  async actualizarUbicacion(workerId: string, lat: number, lng: number, jobId?: string) {
+    const { error } = await supabase
+      .from('worker_locations')
+      .upsert({ worker_id: workerId, lat, lng, updated_at: new Date() });
+
+    if (error) throw new BadRequestException('Error al guardar ubicación.');
+
+    if (!jobId) return { mensaje: 'Ubicación actualizada' };
+
+    const { data: job, error: jobError } = await supabase
+      .from('jobs')
+      .select('lat, lng')
+      .eq('id', jobId)
+      .single();
+
+    if (jobError || !job) throw new BadRequestException('No se encontró el trabajo.');
+
+    const distanciaKm = calcularDistanciaKm(lat, lng, job.lat, job.lng);
+    const litros = distanciaKm / RENDIMIENTO_KM_POR_LITRO;
+    const costoARS = litros * PRECIO_NAFTA_ARS;
+
+    return {
+      distanciaRestanteKm: parseFloat(distanciaKm.toFixed(2)),
       nafta: {
         litros: parseFloat(litros.toFixed(3)),
         costoARS: Math.round(costoARS),

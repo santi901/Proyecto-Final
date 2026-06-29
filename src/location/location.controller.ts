@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body } from '@nestjs/common';
 import { LocationService } from './location.service';
 
 @Controller('location')
@@ -14,5 +14,17 @@ export class LocationController {
       direccionTrabajador,
       direccionEmpleador,
     });
+  }
+
+  @Post('actualizar-ubicacion')
+  actualizarUbicacion(
+    @Body() body: { workerId: string; lat: number; lng: number; jobId?: string },
+  ) {
+    return this.locationService.actualizarUbicacion(
+      body.workerId,
+      body.lat,
+      body.lng,
+      body.jobId,
+    );
   }
 }

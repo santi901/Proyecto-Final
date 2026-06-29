@@ -33,7 +33,7 @@ export class TextractService {
       .map(block => block.Text?.toUpperCase() ?? '')
       .join(' ') ?? '';
 
-    const palabrasClave = ['ARGENTINA', 'DOCUMENTO', 'DNI', 'IDENTIDAD', 'NACIONAL'];
+    const palabrasClave = ['ARGENTINA', 'DOCUMENTO', 'DNI', 'IDENTIDAD', 'NACIONAL', 'TRAMITE'];
     const esDni = palabrasClave.some(palabra => textoDetectado.includes(palabra));
 
     if (!esDni) {
