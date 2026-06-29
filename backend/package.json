@@ -8,13 +8,18 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.1045.0",
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/client-textract": "^3.1063.0",
     "@supabase/supabase-js": "^2.105.4",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "socket.io": "^4.8.3"
+    "multer": "^2.0.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
