@@ -1,7 +1,5 @@
-const { createClient } = require('@supabase/supabase-js')
+const supabase = require('../config/supabase')
 const { calcularDistanciaKm } = require('../utils/haversine')
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
 
 const PRECIO_NAFTA_ARS = 2070
 const RENDIMIENTO_KM_POR_LITRO = 13
