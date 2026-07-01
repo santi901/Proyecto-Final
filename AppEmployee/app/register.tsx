@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleado } from '../auth';
+import { NACHO_API_URL } from '../lib/ubicacion';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -206,7 +207,7 @@ export default function RegisterScreen() {
   
       formData.append('userId', form.dni);
   
-      const verificacion = await fetch('https://TU_URL.ngrok-free.app/verificacion/comparar-caras', {
+      const verificacion = await fetch(`${NACHO_API_URL}/verificacion/comparar-caras`, {
         method: 'POST',
         body: formData,
       });

@@ -1,11 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { calcularDistanciaKm } from './haversine.util';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!,
-);
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const PRECIO_NAFTA_ARS = 2070;
 const RENDIMIENTO_KM_POR_LITRO = 13;
@@ -22,6 +17,15 @@ export interface CalcularViajeParams {
 
 @Injectable()
 export class LocationService {
+  private supabase: SupabaseClient;
+
+  constructor() {
+    this.supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!,
+    );
+  }
+
   async geocodificar(direccion: string): Promise<Coordenadas> {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(direccion)}&format=json&limit=1`;
 
@@ -79,7 +83,7 @@ export class LocationService {
   }
 
   async actualizarUbicacion(workerId: string, lat: number, lng: number, jobId?: string) {
-    const { error } = await supabase
+    const { error } = await this.supabase
       .from('worker_locations')
       .upsert({ worker_id: workerId, lat, lng, updated_at: new Date() });
 
@@ -87,7 +91,7 @@ export class LocationService {
 
     if (!jobId) return { mensaje: 'Ubicación actualizada' };
 
-    const { data: job, error: jobError } = await supabase
+    const { data: job, error: jobError } = await this.supabase
       .from('jobs')
       .select('lat, lng')
       .eq('id', jobId)
