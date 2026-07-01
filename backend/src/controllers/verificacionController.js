@@ -1,5 +1,4 @@
 const { RekognitionClient, CompareFacesCommand } = require('@aws-sdk/client-rekognition')
-const { TextractClient, DetectDocumentTextCommand } = require('@aws-sdk/client-textract')
 const { guardarImagen } = require('../utils/storage')
 
 const rekognition = new RekognitionClient({
@@ -9,35 +8,6 @@ const rekognition = new RekognitionClient({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 })
-
-const textract = new TextractClient({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-})
-
-async function validarDni(dniBuffer) {
-  let respuesta
-  try {
-    respuesta = await textract.send(new DetectDocumentTextCommand({
-      Document: { Bytes: dniBuffer },
-    }))
-  } catch {
-    throw { status: 400, message: 'No se pudo leer el DNI. Asegurate de que la foto sea clara y esté bien iluminada.' }
-  }
-
-  const texto = respuesta.Blocks
-    ?.filter(b => b.BlockType === 'LINE')
-    .map(b => b.Text?.toUpperCase() ?? '')
-    .join(' ') ?? ''
-
-  const palabrasClave = ['ARGENTINA', 'DOCUMENTO', 'DNI', 'IDENTIDAD', 'NACIONAL', 'TRAMITE']
-  if (!palabrasClave.some(p => texto.includes(p))) {
-    throw { status: 400, message: 'La imagen no parece ser un DNI válido. Enviá una foto clara del frente de tu DNI.' }
-  }
-}
 
 async function compararCaras(req, res) {
   const imagenes = req.files
@@ -56,12 +26,6 @@ async function compararCaras(req, res) {
 
   if (dni.buffer.equals(selfie.buffer)) {
     return res.status(400).json({ error: 'El DNI y la selfie no pueden ser la misma imagen.' })
-  }
-
-  try {
-    await validarDni(dni.buffer)
-  } catch (err) {
-    return res.status(err.status ?? 400).json({ error: err.message })
   }
 
   try {
