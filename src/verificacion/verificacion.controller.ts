@@ -1,5 +1,5 @@
 import { Controller, Post, UploadedFiles, UseInterceptors, Body, BadRequestException } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { VerificacionService } from './verificacion.service';
 import { StorageService } from './storage.service';
 import { TextractService } from './textract.service';
@@ -14,13 +14,20 @@ export class VerificacionController {
   ) {}
 
   @Post('comparar-caras')
-  @UseInterceptors(FilesInterceptor('imagenes', 2))
-  async compararCaras(@UploadedFiles() imagenes: any[], @Body('userId') userId: string) {
-    if (!imagenes || !Array.isArray(imagenes) || imagenes.length < 2) {
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'dni', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]))
+  async compararCaras(
+    @UploadedFiles() archivos: { dni?: any[]; selfie?: any[] },
+    @Body('userId') userId: string,
+  ) {
+    const dni = archivos?.dni?.[0];
+    const selfie = archivos?.selfie?.[0];
+
+    if (!dni || !selfie) {
       throw new BadRequestException('Tenés que enviar exactamente dos imágenes: la foto del DNI y una selfie.');
     }
-
-    const [dni, selfie] = imagenes;
 
     if (dni.buffer.equals(selfie.buffer)) {
       throw new BadRequestException('El DNI y la selfie no pueden ser la misma imagen.');

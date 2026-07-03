@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleador } from '../auth';
 import { NACHO_API_URL } from '../lib/ubicacion';
@@ -82,11 +83,10 @@ export default function RegisterScreen() {
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: 'base64',
     });
-    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
 
     const { error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
+      .upload(fileName, decodeBase64(base64), { upsert: true, contentType: `image/${ext}` });
 
     if (error) throw error;
 

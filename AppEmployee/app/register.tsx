@@ -13,9 +13,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleado } from '../auth';
-import { NACHO_API_URL } from '../lib/ubicacion';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -53,8 +53,8 @@ export default function RegisterScreen() {
   const [cargando, setCargando] = useState(false);
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Estado del sistema de verificación de identidad de Ignacio:
-  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint /verificacion/comparar-caras
+  // Estado del sistema de verificación de identidad (backend Express, POST /api/verificacion/comparar-caras):
+  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint
   const [verifEstado, setVerifEstado] = useState<'procesando' | 'aprobado' | 'rechazado' | null>(null);
   const [verifMensaje, setVerifMensaje] = useState('');
 
@@ -82,11 +82,10 @@ export default function RegisterScreen() {
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: 'base64',
     });
-    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
 
     const { error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
+      .upload(fileName, decodeBase64(base64), { upsert: true, contentType: `image/${ext}` });
 
     if (error) throw error;
 
@@ -207,18 +206,18 @@ export default function RegisterScreen() {
   
       formData.append('userId', form.dni);
   
-      const verificacion = await fetch(`${NACHO_API_URL}/verificacion/comparar-caras`, {
+      const verificacion = await fetch('https://TU_URL.ngrok-free.app/verificacion/comparar-caras', {
         method: 'POST',
         body: formData,
       });
   
       const resultado = await verificacion.json();
       console.log('Resultado AWS:', resultado);
-  
-      if (resultado.estado !== 'aprobado') {
+
+      if (!verificacion.ok || resultado.estado !== 'aprobado') {
         const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
         setVerifMensaje(
-          resultado.mensaje ||
+          resultado.mensaje || resultado.error || resultado.message ||
             `Las fotos no coinciden${sim}. Asegurate de que la selfie y la foto del DNI sean de la misma persona.`,
         );
         setVerifEstado('rechazado');

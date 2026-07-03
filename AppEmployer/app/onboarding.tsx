@@ -90,12 +90,19 @@ export default function OnboardingScreen() {
       <View className="flex-row justify-center items-center gap-2 mb-6">
         {SLIDES.map((s, i) => {
           const inputRange = [(i - 1) * WIDTH, i * WIDTH, (i + 1) * WIDTH];
-          const ancho = scrollX.interpolate({ inputRange, outputRange: [8, 24, 8], extrapolate: 'clamp' });
+          const escalaX = scrollX.interpolate({ inputRange, outputRange: [1, 3, 1], extrapolate: 'clamp' });
           const opacity = scrollX.interpolate({ inputRange, outputRange: [0.4, 1, 0.4], extrapolate: 'clamp' });
           return (
             <Animated.View
               key={s.titulo}
-              style={{ width: ancho, opacity, height: 8, borderRadius: 4, backgroundColor: '#FFD942' }}
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: '#FFD942',
+                opacity,
+                transform: [{ scaleX: escalaX }],
+              }}
             />
           );
         })}
