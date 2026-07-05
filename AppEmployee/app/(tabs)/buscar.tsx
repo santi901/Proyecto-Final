@@ -15,7 +15,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
-import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -44,7 +44,7 @@ export default function BuscarTrabajoScreen() {
 
   // Pide el permiso de ubicación. Si lo otorgan, obtiene las coordenadas, las muestra
   // en el mapa y se las manda al backend. Si no, deja el estado en 'denegado' (bloquea el uso).
-  async function iniciarUbicacion(userId: string) {
+  async function iniciarUbicacion(userId: string): Promise<EstadoUbicacion> {
     setUbicEstado('cargando');
     setErrorUbic('');
 
@@ -53,7 +53,7 @@ export default function BuscarTrabajoScreen() {
     if (r.estado === 'ok') {
       setCoords(r.coords);
       setUbicEstado('ok');
-      // Mandar al backend de Nacho (no bloquea la UI si falla la red / el endpoint aún no existe)
+      // Mandar al backend de Nacho (no bloquea la UI si falla la red)
       enviarUbicacion(r.coords, userId).catch(e =>
         console.log('No se pudo enviar la ubicación:', e?.message),
       );
@@ -63,21 +63,29 @@ export default function BuscarTrabajoScreen() {
       setErrorUbic(r.mensaje);
       setUbicEstado('error');
     }
+    return r.estado;
   }
 
-  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación.
+  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación y,
+  // si se obtuvo bien, el seguimiento periódico (cada 10s) mientras la pantalla esté abierta.
   useEffect(() => {
     let activo = true;
-    getUsuario().then(u => {
+    let detenerSeguimiento: (() => void) | undefined;
+
+    getUsuario().then(async u => {
       if (!activo) return;
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleado');
       setUsuarioId(u.id);
       // Bloquear acceso si la identidad todavía no está verificada
       if (u.verificado === false) { setAccesoBloqueado(true); return; }
-      iniciarUbicacion(u.id);
+      const estado = await iniciarUbicacion(u.id);
+      if (activo && estado === 'ok') {
+        detenerSeguimiento = seguirUbicacion(u.id, setCoords);
+      }
     });
-    return () => { activo = false; };
+
+    return () => { activo = false; detenerSeguimiento?.(); };
   }, [router]);
 
   // ----- Panel de perfil (se desliza desde el costado) -----
