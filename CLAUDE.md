@@ -10,8 +10,6 @@ This is the **ChanguitApp** monorepo (school project). It contains three indepen
 - **`backend/`** — separate Express/CommonJS backend ("el backend de Nico"). Handles auth, users, and the jobs (`trabajos`) lifecycle. See [backend/CLAUDE.md](backend/CLAUDE.md) for its full architecture — read that file before working in `backend/`.
 - **`AppEmployee/`** and **`AppEmployer/`** — two near-identical Expo/React Native apps (worker-facing and employer-facing clients), each with its own `package.json`.
 
-When making changes, don't assume a fix in one project applies to the others even when the logic looks duplicated (e.g. verification and geolocation exist in both the root NestJS backend and `backend/`) — treat each as its own codebase and check which one the app actually calls before editing.
-
 ## Commands
 
 Root NestJS backend (run from repo root):
@@ -38,6 +36,8 @@ src/verificacion/                  identity verification (DNI + selfie face matc
 src/location/                      geocoding, distance/fuel-cost estimation, live location upsert
 prisma/schema.prisma               present but has no models defined yet — not in active use
 ```
+
+`package.json` also lists deps not used by any module yet (`socket.io`/`@nestjs/websockets`, `firebase-admin`, `@vladmandic/face-api`, `canvas`, `passport`/`passport-jwt`, `@prisma/client`) — only `VerificacionModule` and `LocationModule` are active.
 
 ### Verificación (`src/verificacion`)
 
@@ -77,4 +77,4 @@ Request bodies to the Express backend use camelCase field names (`fechaNacimient
 ## Conventions
 
 - Spanish is used throughout for identifiers, JSON field/route names, and user-facing error/exception messages across all three backends and both apps — match this when adding code rather than switching to English.
-- `backend/` and the root NestJS project both implement verification and location/distance features independently with different implementations (Express+Supabase vs NestJS+AWS). Don't assume changing one updates the other's behavior.
+- `backend/` and the root NestJS project both implement verification and location/distance independently (Express+Supabase vs NestJS+AWS) — don't assume a fix in one applies to the other; check which one the app actually calls before editing.
