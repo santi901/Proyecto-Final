@@ -10,10 +10,14 @@ async function geocodificar(direccion) {
     headers: { 'User-Agent': 'ChanguitApp/1.0 (proyecto escolar)' },
   })
 
-  if (!response.ok) throw { status: 500, message: 'Error al consultar el servicio de geocodificación.' }
+  if (!response.ok) {
+    console.error(`Geocodificación fallida para "${direccion}": Nominatim respondió ${response.status} ${response.statusText}.`)
+    throw { status: 500, message: 'Error al consultar el servicio de geocodificación.' }
+  }
 
   const data = await response.json()
   if (!data || data.length === 0) {
+    console.error(`Geocodificación sin resultados para "${direccion}".`)
     throw { status: 400, message: `No se encontró la dirección: "${direccion}". Intentá con una dirección más completa.` }
   }
 
@@ -45,6 +49,7 @@ async function calcularViaje(req, res) {
       },
     })
   } catch (err) {
+    console.error(`Error calculando viaje (${direccionTrabajador} -> ${direccionEmpleador}): ${err.message ?? err}`)
     return res.status(err.status ?? 500).json({ error: err.message ?? 'Error al calcular el viaje.' })
   }
 }
@@ -53,6 +58,7 @@ async function actualizarUbicacion(req, res) {
   const { workerId, lat, lng, jobId } = req.body
 
   if (!workerId || lat == null || lng == null) {
+    console.error(`Actualización de ubicación rechazada: faltan datos (workerId=${workerId}, lat=${lat}, lng=${lng}).`)
     return res.status(400).json({ error: 'Faltan workerId, lat o lng.' })
   }
 
@@ -60,7 +66,10 @@ async function actualizarUbicacion(req, res) {
     .from('worker_locations')
     .upsert({ worker_id: workerId, lat, lng, updated_at: new Date() })
 
-  if (error) return res.status(500).json({ error: 'Error al guardar la ubicación.' })
+  if (error) {
+    console.error(`Error guardando ubicación en Supabase (workerId=${workerId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error al guardar la ubicación.' })
+  }
 
   if (!jobId) return res.json({ mensaje: 'Ubicación actualizada' })
 
@@ -70,7 +79,10 @@ async function actualizarUbicacion(req, res) {
     .eq('id', jobId)
     .single()
 
-  if (jobError || !job) return res.status(404).json({ error: 'No se encontró el trabajo.' })
+  if (jobError || !job) {
+    console.error(`No se encontró el trabajo jobId=${jobId} al actualizar ubicación de workerId=${workerId}: ${jobError?.message ?? 'sin datos'}`)
+    return res.status(404).json({ error: 'No se encontró el trabajo.' })
+  }
 
   const distanciaKm = calcularDistanciaKm(lat, lng, job.lat, job.lng)
   const litros = distanciaKm / RENDIMIENTO_KM_POR_LITRO

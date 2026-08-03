@@ -15,8 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleador } from '../auth';
-import { NACHO_API_URL } from '../lib/ubicacion';
+import { registrarEmpleador, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -173,28 +172,29 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-
-      const responseDni = await fetch(fotoDni!);
-      const blobDni = await responseDni.blob();
-      formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
-
-      const responseSelfie = await fetch(fotoPerfil!);
-      const blobSelfie = await responseSelfie.blob();
-      formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
-
+      formData.append('dni', {
+        uri: fotoDni!,
+        name: `dni-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
+      formData.append('selfie', {
+        uri: fotoPerfil!,
+        name: `selfie-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
       formData.append('userId', form.dni);
 
-      const verificacion = await fetch(`${NACHO_API_URL}/verificacion/comparar-caras`, {
+      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
         method: 'POST',
         body: formData,
       });
 
       const resultado = await verificacion.json();
 
-      if (resultado.estado !== 'aprobado') {
+      if (!verificacion.ok || resultado.estado !== 'aprobado') {
         const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
         setVerifMensaje(
-          resultado.mensaje ||
+          resultado.mensaje || resultado.error || resultado.message ||
             `Las fotos no coinciden${sim}. Asegurate de que la selfie y la foto del DNI sean de la misma persona.`,
         );
         setVerifEstado('rechazado');

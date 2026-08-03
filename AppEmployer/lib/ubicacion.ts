@@ -1,9 +1,5 @@
 import * as Location from 'expo-location';
-
-// Backend de Ignacio (NestJS) — es distinto al backend de Nico (auth).
-// Reemplazá esta URL por la de ngrok que te pase Nacho, o definí EXPO_PUBLIC_NACHO_API_URL en un .env.
-export const NACHO_API_URL =
-  process.env.EXPO_PUBLIC_NACHO_API_URL ?? 'https://TU_URL.ngrok-free.app';
+import { API_URL, getAccessToken } from '../auth';
 
 const INTERVALO_UBICACION_MS = 10000;
 
@@ -36,12 +32,16 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
   }
 }
 
-// Envía las coordenadas al backend de Nacho para que las guarde en la base de datos.
-// POST /location/actualizar-ubicacion  body { workerId, lat, lng, jobId? }
+// Envía las coordenadas al backend para que las guarde en la base de datos.
+// POST /api/ubicacion/actualizar-ubicacion  body { workerId, lat, lng, jobId? }  (requiere sesión)
 export async function enviarUbicacion(coords: Coordenadas, workerId: string, jobId?: string): Promise<void> {
-  const res = await fetch(`${NACHO_API_URL}/location/actualizar-ubicacion`, {
+  const token = await getAccessToken();
+  const res = await fetch(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ workerId, lat: coords.lat, lng: coords.lng, ...(jobId ? { jobId } : {}) }),
   });
 
