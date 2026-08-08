@@ -15,7 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleado, API_URL } from '../auth';
+import { registrarEmpleado } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -195,18 +195,18 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-      formData.append('dni', {
-        uri: fotoDni!,
-        name: `dni-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
-      formData.append('selfie', {
-        uri: fotoPerfil!,
-        name: `selfie-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
-
-      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
+  
+      const responseDni = await fetch(fotoDni!);
+      const blobDni = await responseDni.blob();
+      formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
+  
+      const responseSelfie = await fetch(fotoPerfil!);
+      const blobSelfie = await responseSelfie.blob();
+      formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
+  
+      formData.append('userId', form.dni);
+  
+      const verificacion = await fetch('https://TU_URL.ngrok-free.app/verificacion/comparar-caras', {
         method: 'POST',
         body: formData,
       });
