@@ -114,16 +114,19 @@ export default function RegisterScreen() {
     }
 
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
 
@@ -152,16 +155,19 @@ export default function RegisterScreen() {
     }
 
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
     const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
@@ -174,13 +180,17 @@ export default function RegisterScreen() {
     try {
       const formData = new FormData();
 
-      const responseDni = await fetch(fotoDni!);
-      const blobDni = await responseDni.blob();
-      formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
+      formData.append('dni', {
+        uri: fotoDni!,
+        name: `dni-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
 
-      const responseSelfie = await fetch(fotoPerfil!);
-      const blobSelfie = await responseSelfie.blob();
-      formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
+      formData.append('selfie', {
+        uri: fotoPerfil!,
+        name: `selfie-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
 
       formData.append('userId', form.dni);
 
