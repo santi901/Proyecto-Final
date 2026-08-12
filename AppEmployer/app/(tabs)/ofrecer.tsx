@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Linking,
@@ -17,6 +18,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -29,6 +31,7 @@ const PANEL_WIDTH = Math.round(SCREEN_W * 0.78);
 
 const CATEGORIAS = ['Limpieza', 'Mudanza', 'Jardín', 'Pintura', 'Plomería', 'Otros'];
 const DIFICULTADES = ['Simple', 'Intermedio', 'Complejo'] as const;
+const PRECIO_FIJO = 4500; // TODO: reemplazar por un cálculo/input real de precio
 
 export default function OfrecerTrabajoScreen() {
   const router = useRouter();
@@ -42,6 +45,8 @@ export default function OfrecerTrabajoScreen() {
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
+  const [publicando, setPublicando] = useState(false);
+  const [errorPublicar, setErrorPublicar] = useState('');
 
   // ----- Ubicación -----
   const [ubicEstado, setUbicEstado] = useState<EstadoUbicacion>('cargando');
@@ -108,6 +113,44 @@ export default function OfrecerTrabajoScreen() {
   async function handleLogout() {
     await authLogout();
     router.replace('/');
+  }
+
+  async function handleOfrecerTrabajo() {
+    setErrorPublicar('');
+
+    if (categoria === null) { setErrorPublicar('Elegí una categoría.'); return; }
+    if (!dificultad) { setErrorPublicar('Elegí una dificultad.'); return; }
+    if (!descripcion.trim()) { setErrorPublicar('Ingresá una descripción del trabajo.'); return; }
+    if (!coords) { setErrorPublicar('No pudimos obtener tu ubicación. Reintentá desde el mapa.'); return; }
+
+    setPublicando(true);
+    try {
+      const { trabajo, pin } = await crearTrabajo({
+        titulo: titulo.trim() || 'Nuevo Trabajo',
+        descripcion: descripcion.trim(),
+        categoria: CATEGORIAS[categoria],
+        nivelDificultad: dificultad,
+        precio: PRECIO_FIJO,
+        latitud: coords.lat,
+        longitud: coords.lng,
+      });
+
+      await guardarPinLocal(trabajo.id, pin);
+
+      Alert.alert(
+        'Trabajo publicado',
+        `Compartí este PIN con el trabajador cuando llegue, para que pueda iniciar el trabajo:\n\n${pin}\n\nTambién lo podés volver a ver en "Mis trabajos".`,
+      );
+
+      setTitulo('Nuevo Trabajo');
+      setDescripcion('');
+      setCategoria(null);
+      setDificultad(null);
+    } catch (e: any) {
+      setErrorPublicar(e.message || 'No pudimos publicar el trabajo. Intentá de nuevo.');
+    } finally {
+      setPublicando(false);
+    }
   }
 
   // ----- Panel deslizable -----
@@ -318,7 +361,7 @@ export default function OfrecerTrabajoScreen() {
           <Text className="text-sm text-[#475569] mb-1">
             Dada la categoría que seleccionaste, el pago final sería de:
           </Text>
-          <Text className="text-2xl font-bold text-[#0f172a] mb-3">$4500</Text>
+          <Text className="text-2xl font-bold text-[#0f172a] mb-3">${PRECIO_FIJO}</Text>
 
           <Pressable className="flex-row items-center justify-between bg-[#f1f5f9] rounded-[10px] px-4 py-3 border border-[#e2e8f0] mb-6">
             <Text className="text-base text-[#64748b]">Método de pago</Text>
@@ -330,9 +373,20 @@ export default function OfrecerTrabajoScreen() {
             </View>
           </Pressable>
 
+          {!!errorPublicar && (
+            <Text className="text-[#e74c3c] text-sm mb-3 text-center">{errorPublicar}</Text>
+          )}
+
           {/* Botón principal */}
-          <Pressable className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90">
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Ofrecer Trabajo</Text>
+          <Pressable
+            onPress={handleOfrecerTrabajo}
+            disabled={publicando}
+            className={`rounded-xl py-4 items-center ${publicando ? 'bg-[#f5e08a]' : 'bg-[#FFD942] active:opacity-90'}`}>
+            {publicando ? (
+              <ActivityIndicator color="#1a1a1a" />
+            ) : (
+              <Text className="text-[#1a1a1a] text-base font-extrabold">Ofrecer Trabajo</Text>
+            )}
           </Pressable>
         </ScrollView>
       </Animated.View>

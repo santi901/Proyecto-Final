@@ -1,14 +1,15 @@
 const supabase = require('../config/supabase')
 const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, creado_en'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en'
 
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { titulo, descripcion, categoria, nivelDificultad, precio } = req.body
+  const { titulo, descripcion, categoria, nivelDificultad, precio, latitud, longitud } = req.body
 
-  if (!titulo || !descripcion || !categoria || precio == null) {
-    return res.status(400).json({ error: 'Faltan campos: titulo, descripcion, categoria, precio' })
+  if (!titulo || !descripcion || !categoria || precio == null || latitud == null || longitud == null) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): faltan campos obligatorios.`)
+    return res.status(400).json({ error: 'Faltan campos: titulo, descripcion, categoria, precio, latitud, longitud' })
   }
 
   // Buscar perfil del empleador
@@ -16,6 +17,7 @@ async function crearTrabajo(req, res) {
     .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
 
   if (!perfil) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): no tiene perfil de empleador creado.`)
     return res.status(400).json({ error: 'Completá tu perfil antes de crear un trabajo' })
   }
 
@@ -30,6 +32,8 @@ async function crearTrabajo(req, res) {
       titulo, descripcion, categoria,
       nivel_dificultad: nivelDificultad ?? null,
       precio,
+      latitud,
+      longitud,
       estado:           'pendiente',
       pin_hash:         pinHash,
       pin_expira_en:    expira.toISOString(),
@@ -38,7 +42,7 @@ async function crearTrabajo(req, res) {
     .single()
 
   if (error) {
-    console.error('Error creando trabajo:', error)
+    console.error(`Error creando trabajo (empleadorId=${perfil.id}): ${error.message ?? error}`)
     return res.status(500).json({ error: 'Error creando trabajo' })
   }
 
@@ -71,6 +75,48 @@ async function listarTrabajos(req, res) {
     .order('creado_en', { ascending: false })
 
   if (error) return res.status(500).json({ error: 'Error listando trabajos' })
+  res.json({ trabajos })
+}
+
+// GET /api/trabajos/mios — a diferencia de listarTrabajos (que para un empleado
+// muestra los 'pendiente' disponibles para tomar), esto devuelve los trabajos
+// propios del usuario en cualquier estado: los que publicó (empleador) o los
+// que tiene asignados/en curso/completados (empleado).
+async function misTrabajos(req, res) {
+  const { id: usuarioId, tipo } = req.usuario
+
+  if (tipo === 'empleador') {
+    const { data: perfil } = await supabase
+      .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+    if (!perfil) return res.status(404).json({ error: 'Perfil no encontrado' })
+
+    const { data: trabajos, error } = await supabase
+      .from('trabajos').select(CAMPOS_PUBLICOS)
+      .eq('empleador_id', perfil.id)
+      .order('creado_en', { ascending: false })
+
+    if (error) {
+      console.error(`Error listando trabajos propios (empleadorId=${perfil.id}): ${error.message ?? error}`)
+      return res.status(500).json({ error: 'Error listando trabajos' })
+    }
+    return res.json({ trabajos })
+  }
+
+  const { data: empleado } = await supabase
+    .from('empleados').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!empleado) return res.status(404).json({ error: 'Perfil no encontrado' })
+
+  const { data: trabajos, error } = await supabase
+    .from('trabajos').select(CAMPOS_PUBLICOS)
+    .eq('trabajador_id', empleado.id)
+    .order('creado_en', { ascending: false })
+
+  if (error) {
+    console.error(`Error listando trabajos propios (empleadoId=${empleado.id}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error listando trabajos' })
+  }
   res.json({ trabajos })
 }
 
@@ -157,7 +203,7 @@ async function completarTrabajo(req, res) {
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, trabajador_id')
+    .select('id, estado, trabajador_id, empleador_id')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -169,7 +215,15 @@ async function completarTrabajo(req, res) {
     const { data: empleado } = await supabase
       .from('empleados').select('id').eq('user_id', usuarioId).maybeSingle()
     if (!empleado || trabajo.trabajador_id !== empleado.id) {
+      console.error(`Completar trabajo rechazado (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleado asignado.`)
       return res.status(403).json({ error: 'No tenés asignado este trabajo' })
+    }
+  } else {
+    const { data: perfil } = await supabase
+      .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+    if (!perfil || trabajo.empleador_id !== perfil.id) {
+      console.error(`Completar trabajo rechazado (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+      return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
     }
   }
 
@@ -179,6 +233,6 @@ async function completarTrabajo(req, res) {
 }
 
 module.exports = {
-  crearTrabajo, listarTrabajos, obtenerTrabajo,
+  crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo,
 }

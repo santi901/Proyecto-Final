@@ -74,8 +74,8 @@ async function actualizarUbicacion(req, res) {
   if (!jobId) return res.json({ mensaje: 'Ubicación actualizada' })
 
   const { data: job, error: jobError } = await supabase
-    .from('jobs')
-    .select('lat, lng')
+    .from('trabajos')
+    .select('latitud, longitud')
     .eq('id', jobId)
     .single()
 
@@ -84,7 +84,7 @@ async function actualizarUbicacion(req, res) {
     return res.status(404).json({ error: 'No se encontró el trabajo.' })
   }
 
-  const distanciaKm = calcularDistanciaKm(lat, lng, job.lat, job.lng)
+  const distanciaKm = calcularDistanciaKm(lat, lng, job.latitud, job.longitud)
   const litros = distanciaKm / RENDIMIENTO_KM_POR_LITRO
   const costoARS = litros * PRECIO_NAFTA_ARS
 

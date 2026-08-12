@@ -1,124 +1,168 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { misTrabajosAsignados, validarPin, completarTrabajo, type Trabajo } from '../../lib/trabajos';
 
-type Recibo = {
-  id: number;
-  mes: string;
-  bruto: number;
-  neto: number;
-  estado: 'Pagado' | 'Pendiente';
+const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
+  pendiente: 'Pendiente',
+  asignado: 'Asignado',
+  en_progreso: 'En progreso',
+  completado: 'Completado',
 };
 
-const RECIBOS: Recibo[] = [
-  { id: 1, mes: 'Abril 2026', bruto: 850000, neto: 705000, estado: 'Pendiente' },
-  { id: 2, mes: 'Marzo 2026', bruto: 820000, neto: 680600, estado: 'Pagado' },
-  { id: 3, mes: 'Febrero 2026', bruto: 800000, neto: 664000, estado: 'Pagado' },
-  { id: 4, mes: 'Enero 2026', bruto: 780000, neto: 647400, estado: 'Pagado' },
-  { id: 5, mes: 'Diciembre 2025', bruto: 1170000, neto: 970000, estado: 'Pagado' },
-];
+const ESTADO_COLOR: Record<Trabajo['estado'], string> = {
+  pendiente: '#b9770e',
+  asignado: '#0a7ea4',
+  en_progreso: '#1d8348',
+  completado: '#64748b',
+};
 
-const formatPesos = (n: number) =>
-  '$' + n.toLocaleString('es-AR', { maximumFractionDigits: 0 });
+export default function MiTrabajoScreen() {
+  const insets = useSafeAreaInsets();
+  const [trabajos, setTrabajos] = useState<Trabajo[] | null>(null);
+  const [error, setError] = useState('');
+  const [pinInputs, setPinInputs] = useState<Record<string, string>>({});
+  const [validandoId, setValidandoId] = useState<string | null>(null);
+  const [completandoId, setCompletandoId] = useState<string | null>(null);
 
-export default function RecibosScreen() {
+  const cargar = useCallback(async () => {
+    setError('');
+    try {
+      const { trabajos } = await misTrabajosAsignados();
+      setTrabajos(trabajos);
+    } catch (e: any) {
+      setError(e.message || 'No pudimos cargar tu trabajo.');
+    }
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+  // Recarga al volver a esta pestaña (por ej. después de aceptar un trabajo nuevo).
+  useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
+
+  async function handleValidarPin(id: string) {
+    const pin = (pinInputs[id] || '').trim();
+    if (pin.length !== 6) {
+      Alert.alert('PIN inválido', 'El PIN tiene 6 dígitos.');
+      return;
+    }
+
+    setValidandoId(id);
+    try {
+      const { message } = await validarPin(id, pin);
+      Alert.alert('Trabajo iniciado', message);
+      setPinInputs((s) => ({ ...s, [id]: '' }));
+      cargar();
+    } catch (e: any) {
+      Alert.alert('PIN incorrecto', e.message || 'Intentá de nuevo.');
+    } finally {
+      setValidandoId(null);
+    }
+  }
+
+  async function handleCompletar(id: string) {
+    setCompletandoId(id);
+    try {
+      const { message } = await completarTrabajo(id);
+      Alert.alert('Trabajo completado', message);
+      cargar();
+    } catch (e: any) {
+      Alert.alert('No se pudo completar', e.message || 'Intentá de nuevo.');
+    } finally {
+      setCompletandoId(null);
+    }
+  }
+
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-      <Text style={styles.titulo}>Mis recibos</Text>
-      <Text style={styles.sub}>Ultimos {RECIBOS.length} periodos</Text>
+    <View className="flex-1 bg-[#f1f5f9]" style={{ paddingTop: insets.top }}>
+      <View className="px-5 pt-4 pb-2">
+        <Text className="text-2xl font-bold text-[#0f172a]">Mi trabajo</Text>
+        <Text className="text-sm text-[#64748b] mt-1">Los trabajos que aceptaste</Text>
+      </View>
 
-      {RECIBOS.map((r) => (
-        <View key={r.id} style={styles.card}>
-          <View style={styles.cardTop}>
-            <Text style={styles.mes}>{r.mes}</Text>
-            <View
-              style={[
-                styles.badge,
-                {
-                  backgroundColor:
-                    r.estado === 'Pagado' ? '#1d8348' : '#b9770e',
-                },
-              ]}>
-              <Text style={styles.badgeTxt}>{r.estado}</Text>
+      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}>
+        {trabajos === null && !error && (
+          <View className="items-center py-10">
+            <ActivityIndicator color="#FFD942" />
+          </View>
+        )}
+
+        {!!error && (
+          <View className="items-center py-6">
+            <Text className="text-[#e74c3c] text-sm text-center mb-3">{error}</Text>
+            <Pressable onPress={cargar} className="px-4 py-2 rounded-lg border border-[#e2e8f0] active:opacity-70">
+              <Text className="text-[#475569] text-sm font-semibold">Reintentar</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {trabajos !== null && !error && trabajos.length === 0 && (
+          <View className="items-center py-10">
+            <Text className="text-[#64748b] text-sm text-center">
+              Todavía no aceptaste ningún trabajo. Buscá uno disponible desde la pantalla principal.
+            </Text>
+          </View>
+        )}
+
+        {trabajos !== null && trabajos.map((t) => (
+          <View key={t.id} className="bg-white rounded-xl border border-[#e2e8f0] p-4 mb-3">
+            <View className="flex-row justify-between items-start mb-1">
+              <Text className="text-base font-bold text-[#0f172a] flex-1 pr-2">{t.titulo}</Text>
+              <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: ESTADO_COLOR[t.estado] }}>
+                <Text className="text-white text-[11px] font-bold">{ESTADO_LABEL[t.estado]}</Text>
+              </View>
             </View>
+            <Text className="text-[13px] text-[#64748b] mb-3">
+              {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''} · ${t.precio}
+            </Text>
+
+            {t.estado === 'asignado' && (
+              <View>
+                <Text className="text-[13px] text-[#475569] mb-2">
+                  Pedile el PIN al empleador cuando llegues, para iniciar el trabajo:
+                </Text>
+                <View className="flex-row gap-2">
+                  <TextInput
+                    value={pinInputs[t.id] || ''}
+                    onChangeText={(v) => setPinInputs((s) => ({ ...s, [t.id]: v.replace(/[^0-9]/g, '').slice(0, 6) }))}
+                    placeholder="PIN"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    className="flex-1 bg-[#f1f5f9] rounded-lg px-4 py-2.5 text-base text-[#0f172a] border border-[#e2e8f0] tracking-[4px]"
+                  />
+                  <Pressable
+                    onPress={() => handleValidarPin(t.id)}
+                    disabled={validandoId === t.id}
+                    className={`rounded-lg px-4 items-center justify-center ${
+                      validandoId === t.id ? 'bg-[#f5e08a]' : 'bg-[#FFD942] active:opacity-90'
+                    }`}>
+                    {validandoId === t.id ? (
+                      <ActivityIndicator color="#1a1a1a" size="small" />
+                    ) : (
+                      <Text className="text-[#1a1a1a] text-sm font-extrabold">Iniciar</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {t.estado === 'en_progreso' && (
+              <Pressable
+                onPress={() => handleCompletar(t.id)}
+                disabled={completandoId === t.id}
+                className={`rounded-lg py-2.5 items-center ${
+                  completandoId === t.id ? 'bg-[#a8d9bd]' : 'bg-[#1d8348] active:opacity-90'
+                }`}>
+                {completandoId === t.id ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : (
+                  <Text className="text-white text-sm font-extrabold">Marcar como completado</Text>
+                )}
+              </Pressable>
+            )}
           </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>Bruto</Text>
-            <Text style={styles.val}>{formatPesos(r.bruto)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>Neto a cobrar</Text>
-            <Text style={[styles.val, styles.neto]}>{formatPesos(r.neto)}</Text>
-          </View>
-        </View>
-      ))}
-    </ScrollView>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  scroll: {
-    flex: 1,
-    backgroundColor: '#f1f5f9',
-  },
-  content: {
-    padding: 16,
-    paddingTop: 60,
-  },
-  titulo: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  sub: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 20,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  cardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  mes: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeTxt: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  label: {
-    fontSize: 14,
-    color: '#64748b',
-  },
-  val: {
-    fontSize: 14,
-    color: '#0f172a',
-    fontWeight: '600',
-  },
-  neto: {
-    color: '#1d8348',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});

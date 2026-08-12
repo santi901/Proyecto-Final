@@ -9,10 +9,30 @@ export const unstable_settings = {
   initialRouteName: 'ofrecer',
 };
 
-// Barra inferior con un único ícono centrado
+// Barra inferior con dos íconos centrados: publicar trabajo y mis trabajos publicados
 function CenterTabBar({ navigation, state }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const enPrincipal = state.routes[state.index]?.name === 'ofrecer';
+  const rutaActual = state.routes[state.index]?.name;
+
+  const Boton = ({ ruta, icono }: { ruta: 'ofrecer' | 'explore'; icono: keyof typeof MaterialIcons.glyphMap }) => {
+    const activo = rutaActual === ruta;
+    return (
+      <Pressable
+        onPress={() => navigation.navigate(ruta)}
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: activo ? '#FFD942' : '#f1f5f9',
+          borderWidth: activo ? 0 : 1,
+          borderColor: '#e2e8f0',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+        <MaterialIcons name={icono} size={28} color={activo ? '#1a1a1a' : '#64748b'} />
+      </Pressable>
+    );
+  };
 
   return (
     <View
@@ -22,23 +42,13 @@ function CenterTabBar({ navigation, state }: BottomTabBarProps) {
         borderTopColor: '#e2e8f0',
         paddingTop: 8,
         paddingBottom: insets.bottom + 8,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 20,
       }}>
-      <Pressable
-        onPress={() => navigation.navigate('ofrecer')}
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: enPrincipal ? '#FFD942' : '#f1f5f9',
-          borderWidth: enPrincipal ? 0 : 1,
-          borderColor: '#e2e8f0',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-        <MaterialIcons name="home" size={28} color={enPrincipal ? '#1a1a1a' : '#64748b'} />
-      </Pressable>
+      <Boton ruta="ofrecer" icono="home" />
+      <Boton ruta="explore" icono="assignment" />
     </View>
   );
 }

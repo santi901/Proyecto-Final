@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Linking,
@@ -16,6 +17,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -31,11 +33,15 @@ export default function BuscarTrabajoScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
 
-  const [seleccion, setSeleccion] = useState<number | null>(null);
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
   const [accesoBloqueado, setAccesoBloqueado] = useState(false);
+
+  // ----- Trabajos disponibles -----
+  const [trabajos, setTrabajos] = useState<Trabajo[] | null>(null);
+  const [errorTrabajos, setErrorTrabajos] = useState('');
+  const [aceptandoId, setAceptandoId] = useState<string | null>(null);
 
   // ----- Ubicación -----
   const [ubicEstado, setUbicEstado] = useState<EstadoUbicacion>('cargando');
@@ -104,6 +110,35 @@ export default function BuscarTrabajoScreen() {
   async function handleLogout() {
     await authLogout();
     router.replace('/');
+  }
+
+  // Trae los trabajos 'pendiente' disponibles. Se llama al obtener la ubicación
+  // y desde el botón de reintentar/actualizar.
+  async function cargarTrabajos() {
+    setErrorTrabajos('');
+    try {
+      const { trabajos } = await listarTrabajos();
+      setTrabajos(trabajos);
+    } catch (e: any) {
+      setErrorTrabajos(e.message || 'No pudimos cargar los trabajos disponibles.');
+    }
+  }
+
+  useEffect(() => {
+    if (ubicEstado === 'ok') cargarTrabajos();
+  }, [ubicEstado]);
+
+  async function handleAceptar(id: string) {
+    setAceptandoId(id);
+    try {
+      const { message } = await aceptarTrabajo(id);
+      setTrabajos(prev => prev?.filter(t => t.id !== id) ?? prev);
+      Alert.alert('Trabajo aceptado', message);
+    } catch (e: any) {
+      Alert.alert('No se pudo aceptar', e.message || 'Intentá de nuevo.');
+    } finally {
+      setAceptandoId(null);
+    }
   }
 
   // ----- Panel deslizable -----
@@ -261,24 +296,71 @@ export default function BuscarTrabajoScreen() {
           contentContainerStyle={{ paddingTop: 8, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled">
-          {/* Grilla de opciones */}
-          <View className="flex-row flex-wrap justify-between mb-5">
-            {[0, 1, 2, 3, 4, 5].map((i) => {
-              const sel = seleccion === i;
-              return (
-                <Pressable
-                  key={i}
-                  onPress={() => setSeleccion(i)}
-                  className={`w-[31%] aspect-[4/3] rounded-xl mb-3 border ${
-                    sel ? 'border-[#FFD942] bg-[#fff8da]' : 'border-[#e2e8f0] bg-[#f1f5f9]'
-                  }`}>
-                  <View className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-[#94a3b8] items-center justify-center">
-                    <Text className="text-white text-[9px] font-bold">i</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
+          {/* Trabajos disponibles */}
+          <View className="flex-row items-center justify-between mb-3">
+            <Text className="text-[13px] font-semibold text-[#475569]">Trabajos disponibles</Text>
+            <Pressable onPress={cargarTrabajos} className="p-1 active:opacity-60">
+              <MaterialIcons name="refresh" size={20} color="#475569" />
+            </Pressable>
           </View>
+
+          {trabajos === null && !errorTrabajos && (
+            <View className="items-center py-10">
+              <ActivityIndicator color="#FFD942" />
+              <Text className="text-[#64748b] text-sm mt-3">Buscando trabajos disponibles…</Text>
+            </View>
+          )}
+
+          {!!errorTrabajos && (
+            <View className="items-center py-6">
+              <Text className="text-[#e74c3c] text-sm text-center mb-3">{errorTrabajos}</Text>
+              <Pressable
+                onPress={cargarTrabajos}
+                className="px-4 py-2 rounded-lg border border-[#e2e8f0] active:opacity-70">
+                <Text className="text-[#475569] text-sm font-semibold">Reintentar</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {trabajos !== null && !errorTrabajos && trabajos.length === 0 && (
+            <View className="items-center py-10">
+              <MaterialIcons name="search-off" size={32} color="#94a3b8" />
+              <Text className="text-[#64748b] text-sm mt-3 text-center">
+                No hay trabajos disponibles por ahora.
+              </Text>
+            </View>
+          )}
+
+          {trabajos !== null && trabajos.length > 0 && (
+            <View className="mb-5">
+              {trabajos.map((t) => (
+                <View key={t.id} className="bg-[#f8fafc] rounded-xl border border-[#e2e8f0] p-4 mb-3">
+                  <View className="flex-row justify-between items-start mb-1">
+                    <Text className="text-base font-bold text-[#0f172a] flex-1 pr-2">{t.titulo}</Text>
+                    <Text className="text-base font-bold text-[#0f172a]">${t.precio}</Text>
+                  </View>
+                  <Text className="text-[13px] text-[#64748b] mb-2">
+                    {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''}
+                  </Text>
+                  <Text className="text-sm text-[#475569] mb-3" numberOfLines={2}>
+                    {t.descripcion}
+                  </Text>
+                  <Pressable
+                    onPress={() => handleAceptar(t.id)}
+                    disabled={aceptandoId === t.id}
+                    className={`rounded-lg py-3 items-center ${
+                      aceptandoId === t.id ? 'bg-[#f5e08a]' : 'bg-[#FFD942] active:opacity-90'
+                    }`}>
+                    {aceptandoId === t.id ? (
+                      <ActivityIndicator color="#1a1a1a" size="small" />
+                    ) : (
+                      <Text className="text-[#1a1a1a] text-sm font-extrabold">Aceptar trabajo</Text>
+                    )}
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Ayuda + Método de cobro */}
           <View className="flex-row gap-3 mb-6">
@@ -292,10 +374,6 @@ export default function BuscarTrabajoScreen() {
             </Pressable>
           </View>
 
-          {/* Botón principal */}
-          <Pressable className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90">
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Buscar Trabajo</Text>
-          </Pressable>
         </ScrollView>
       </Animated.View>
 
