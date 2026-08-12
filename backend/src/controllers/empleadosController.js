@@ -19,7 +19,7 @@ async function actualizarPerfil(req, res) {
   const {
     nombre, apellido, fechaNacimiento, dni,
     codigoPostal, direccion, radioBusqueda,
-    fotoUrl, fotoDniUrl, lat, lng,
+    fotoUrl, fotoDniUrl, lat, lng, categorias,
   } = req.body
 
   if (!nombre || !apellido || !fechaNacimiento || !dni || !codigoPostal || !direccion) {
@@ -39,6 +39,7 @@ async function actualizarPerfil(req, res) {
       foto_dni_url:    fotoDniUrl ?? null,
       lat:             lat ?? null,
       lng:             lng ?? null,
+      categorias:      Array.isArray(categorias) ? categorias : [],
     })
     .eq('user_id', id)
     .select()

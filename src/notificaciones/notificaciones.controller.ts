@@ -1,4 +1,11 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  BadRequestException,
+} from '@nestjs/common';
 import {
   NotificacionesService,
   EnviarNotificacionParams,
@@ -15,6 +22,9 @@ export class NotificacionesController {
 
   @Get()
   listar(@Query('destinatarioId') destinatarioId: string) {
+    if (!destinatarioId) {
+      throw new BadRequestException('destinatarioId es requerido.');
+    }
     return this.notificacionesService.listarNotificaciones(destinatarioId);
   }
 }

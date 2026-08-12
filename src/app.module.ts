@@ -6,6 +6,7 @@ import { VerificacionModule } from './verificacion/verificacion.module';
 import { LocationModule } from './location/location.module';
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { SupabaseModule } from './supabase/supabase.module';
+import { MatchingModule } from './matching/matching.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { SupabaseModule } from './supabase/supabase.module';
     VerificacionModule,
     LocationModule,
     NotificacionesModule,
+    MatchingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
