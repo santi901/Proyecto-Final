@@ -5,11 +5,19 @@ import { SUPABASE_CLIENT } from '../supabase/supabase.module';
 
 export interface EnviarNotificacionParams {
   destinatarioId: string;
-  expoPushToken: string;
   tipo: string;
   mensaje: string;
   titulo?: string;
   trabajoId?: string;
+  // Opcional: si no se manda, se busca el token que el usuario haya
+  // registrado con registrarToken(). Pensado para que quien dispara la
+  // notificación (ej. el backend de trabajos) no tenga que conocer tokens.
+  expoPushToken?: string;
+}
+
+export interface RegistrarTokenParams {
+  usuarioId: string;
+  expoPushToken: string;
 }
 
 interface SupabaseSingleResult<T> {
@@ -39,12 +47,10 @@ export class NotificacionesService {
   async enviarNotificacion(
     params: EnviarNotificacionParams,
   ): Promise<NotificacionRow> {
-    const { destinatarioId, expoPushToken, tipo, mensaje, titulo, trabajoId } =
-      params;
+    const { destinatarioId, tipo, mensaje, titulo, trabajoId } = params;
 
-    if (!Expo.isExpoPushToken(expoPushToken)) {
-      throw new BadRequestException('El expoPushToken no es válido.');
-    }
+    const expoPushToken =
+      params.expoPushToken ?? (await this.buscarToken(destinatarioId));
 
     // Se registra como "pendiente" ANTES de mandar el push: si esto falla,
     // cortamos acá y no se llega a mandar nada, así nunca hay un push real
@@ -69,15 +75,19 @@ export class NotificacionesService {
       throw new BadRequestException('Error al registrar la notificación.');
     }
 
-    const push: ExpoPushMessage = {
-      to: expoPushToken,
-      sound: 'default',
-      title: titulo ?? 'ChanguitApp',
-      body: mensaje,
-      data: { tipo, trabajoId },
-    };
-
-    const estadoEnvio = await this.intentarEnviarPush(push);
+    // Sin token válido (usuario nunca lo registró, o notificaciones
+    // desactivadas) no se manda el push, pero igual queda el registro
+    // arriba como "fallido" — no debe frenar a quien dispara la notificación.
+    const estadoEnvio =
+      expoPushToken && Expo.isExpoPushToken(expoPushToken)
+        ? await this.intentarEnviarPush({
+            to: expoPushToken,
+            sound: 'default',
+            title: titulo ?? 'ChanguitApp',
+            body: mensaje,
+            data: { tipo, trabajoId },
+          })
+        : 'fallido';
 
     const {
       data: actualizado,
@@ -109,6 +119,35 @@ export class NotificacionesService {
     } catch {
       return 'fallido';
     }
+  }
+
+  async registrarToken(params: RegistrarTokenParams): Promise<void> {
+    const { usuarioId, expoPushToken } = params;
+
+    if (!Expo.isExpoPushToken(expoPushToken)) {
+      throw new BadRequestException('El expoPushToken no es válido.');
+    }
+
+    const { error } = await this.supabase
+      .from('push_tokens')
+      .upsert(
+        { usuario_id: usuarioId, expo_push_token: expoPushToken },
+        { onConflict: 'usuario_id' },
+      );
+
+    if (error) {
+      throw new BadRequestException('Error al registrar el token.');
+    }
+  }
+
+  private async buscarToken(usuarioId: string): Promise<string | undefined> {
+    const { data } = await this.supabase
+      .from('push_tokens')
+      .select('expo_push_token')
+      .eq('usuario_id', usuarioId)
+      .maybeSingle();
+
+    return (data?.expo_push_token as string | undefined) ?? undefined;
   }
 
   async listarNotificaciones(

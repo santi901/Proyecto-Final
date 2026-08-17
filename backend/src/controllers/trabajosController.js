@@ -3,6 +3,55 @@ const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 
 const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, creado_en'
 
+// Backend NestJS de Nacho (verificación, ubicación, matching, notificaciones).
+const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
+
+// Nunca debe frenar el flujo del trabajo: si el servicio de notificaciones
+// está caído o el usuario no tiene push token, esto solo loguea y sigue.
+async function notificar(destinatarioId, { tipo, mensaje, titulo, trabajoId }) {
+  if (!destinatarioId) return
+  try {
+    await fetch(`${NACHO_API_URL}/notificaciones`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ destinatarioId, tipo, mensaje, titulo, trabajoId }),
+    })
+  } catch (error) {
+    console.error('Error mandando notificación:', error.message)
+  }
+}
+
+async function notificarEmpleador(perfilId, payload) {
+  const { data } = await supabase.from('perfiles').select('user_id').eq('id', perfilId).maybeSingle()
+  if (data?.user_id) await notificar(data.user_id, payload)
+}
+
+async function notificarEmpleado(empleadoId, payload) {
+  const { data } = await supabase.from('empleados').select('user_id').eq('id', empleadoId).maybeSingle()
+  if (data?.user_id) await notificar(data.user_id, payload)
+}
+
+// Le pide a /matching quiénes son los trabajadores que matchean (categoría +
+// distancia + disponibilidad) y les manda la notificación de nueva oferta.
+async function notificarNuevoTrabajo(trabajo) {
+  try {
+    const respuesta = await fetch(
+      `${NACHO_API_URL}/matching/trabajadores-disponibles?trabajoId=${trabajo.id}`,
+    )
+    if (!respuesta.ok) return
+    const candidatos = await respuesta.json()
+
+    await Promise.all(candidatos.map((candidato) => notificar(candidato.userId, {
+      tipo:    'nueva_oferta',
+      titulo:  'Nuevo trabajo disponible',
+      mensaje: `Hay un nuevo trabajo de ${trabajo.categoria} cerca tuyo: "${trabajo.titulo}"`,
+      trabajoId: trabajo.id,
+    })))
+  } catch (error) {
+    console.error('Error buscando trabajadores para notificar:', error.message)
+  }
+}
+
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
   const { titulo, descripcion, categoria, nivelDificultad, precio } = req.body
@@ -44,6 +93,9 @@ async function crearTrabajo(req, res) {
 
   // PIN se retorna SOLO aquí — el empleador lo muestra al empleado al llegar
   res.status(201).json({ trabajo, pin })
+
+  // No se espera esta llamada: no debe demorar la respuesta ni fallar la creación del trabajo.
+  notificarNuevoTrabajo(trabajo)
 }
 
 async function listarTrabajos(req, res) {
@@ -99,7 +151,7 @@ async function aceptarTrabajo(req, res) {
   }
 
   const { data: trabajo } = await supabase
-    .from('trabajos').select('id, estado').eq('id', trabajoId).maybeSingle()
+    .from('trabajos').select('id, estado, empleador_id').eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
   if (trabajo.estado !== 'pendiente') {
@@ -114,6 +166,13 @@ async function aceptarTrabajo(req, res) {
   if (error) return res.status(500).json({ error: 'Error aceptando trabajo' })
 
   res.json({ message: 'Trabajo aceptado. El empleador te dará el PIN para iniciar.' })
+
+  notificarEmpleador(trabajo.empleador_id, {
+    tipo:    'cambio_estado',
+    titulo:  'Trabajo aceptado',
+    mensaje: 'Un trabajador aceptó tu trabajo. Compartile el PIN cuando llegue.',
+    trabajoId,
+  })
 }
 
 async function validarPinTrabajo(req, res) {
@@ -125,7 +184,7 @@ async function validarPinTrabajo(req, res) {
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, pin_hash, pin_expira_en, trabajador_id')
+    .select('id, estado, pin_hash, pin_expira_en, trabajador_id, empleador_id')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -149,6 +208,13 @@ async function validarPinTrabajo(req, res) {
   await supabase.from('trabajos').update({ estado: 'en_progreso' }).eq('id', trabajoId)
 
   res.json({ success: true, message: 'PIN validado. Trabajo iniciado.' })
+
+  notificarEmpleador(trabajo.empleador_id, {
+    tipo:    'cambio_estado',
+    titulo:  'Trabajo iniciado',
+    mensaje: 'El trabajador validó el PIN y arrancó el trabajo.',
+    trabajoId,
+  })
 }
 
 async function completarTrabajo(req, res) {
@@ -157,7 +223,7 @@ async function completarTrabajo(req, res) {
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, trabajador_id')
+    .select('id, estado, trabajador_id, empleador_id')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -176,6 +242,19 @@ async function completarTrabajo(req, res) {
   await supabase.from('trabajos').update({ estado: 'completado' }).eq('id', trabajoId)
 
   res.json({ message: 'Trabajo completado exitosamente' })
+
+  // Se avisa a la otra parte, no a quien acaba de marcar el trabajo como completado.
+  const payload = {
+    tipo:    'cambio_estado',
+    titulo:  'Trabajo completado',
+    mensaje: 'El trabajo se marcó como completado.',
+    trabajoId,
+  }
+  if (tipo === 'empleado') {
+    notificarEmpleador(trabajo.empleador_id, payload)
+  } else if (trabajo.trabajador_id) {
+    notificarEmpleado(trabajo.trabajador_id, payload)
+  }
 }
 
 module.exports = {

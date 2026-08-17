@@ -8,6 +8,7 @@ const ESTADOS_TRABAJO_ACTIVO = ['asignado', 'en_progreso'];
 
 export interface TrabajadorDisponible {
   id: string;
+  userId: string;
   nombre: string;
   apellido: string;
   distanciaKm: number;
@@ -53,7 +54,7 @@ export class MatchingService {
 
     const { data: candidatos, error: candidatosError } = await this.supabase
       .from('empleados')
-      .select('id, nombre, apellido, lat, lng, radio_busqueda, categorias')
+      .select('id, user_id, nombre, apellido, lat, lng, radio_busqueda, categorias')
       .contains('categorias', [trabajo.categoria])
       .not('lat', 'is', null)
       .not('lng', 'is', null);
@@ -79,6 +80,7 @@ export class MatchingService {
       .filter((candidato) => !idsOcupados.has(candidato.id as string))
       .map((candidato) => ({
         id: candidato.id as string,
+        userId: candidato.user_id as string,
         nombre: candidato.nombre as string,
         apellido: candidato.apellido as string,
         radioMaximoKm:
@@ -92,8 +94,9 @@ export class MatchingService {
       }))
       .filter((candidato) => candidato.distanciaKm <= candidato.radioMaximoKm)
       .sort((a, b) => a.distanciaKm - b.distanciaKm)
-      .map(({ id, nombre, apellido, distanciaKm }) => ({
+      .map(({ id, userId, nombre, apellido, distanciaKm }) => ({
         id,
+        userId,
         nombre,
         apellido,
         distanciaKm: parseFloat(distanciaKm.toFixed(2)),

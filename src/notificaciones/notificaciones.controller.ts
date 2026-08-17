@@ -9,6 +9,7 @@ import {
 import {
   NotificacionesService,
   EnviarNotificacionParams,
+  RegistrarTokenParams,
 } from './notificaciones.service';
 
 @Controller('notificaciones')
@@ -18,6 +19,12 @@ export class NotificacionesController {
   @Post()
   enviar(@Body() body: EnviarNotificacionParams) {
     return this.notificacionesService.enviarNotificacion(body);
+  }
+
+  @Post('registrar-token')
+  async registrarToken(@Body() body: RegistrarTokenParams) {
+    await this.notificacionesService.registrarToken(body);
+    return { mensaje: 'Token registrado' };
   }
 
   @Get()

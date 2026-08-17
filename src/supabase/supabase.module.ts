@@ -9,7 +9,7 @@ export const SUPABASE_CLIENT = 'SUPABASE_CLIENT';
     {
       provide: SUPABASE_CLIENT,
       useFactory: () =>
-        createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY),
+        createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY),
     },
   ],
   exports: [SUPABASE_CLIENT],
