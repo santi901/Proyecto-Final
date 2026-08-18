@@ -24,42 +24,42 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView
-      className="flex-1 bg-[#f1f5f9]"
+      className="flex-1 bg-fondo"
       contentContainerStyle={{ padding: 16, paddingTop: insets.top + 24, paddingBottom: 24 }}>
       <View className="mb-5">
-        <Text className="text-base text-[#475569]">Hola,</Text>
-        <Text className="text-2xl font-bold text-[#0f172a]">{usuario}</Text>
+        <Text className="text-base font-nunito text-neutro">Hola,</Text>
+        <Text className="text-2xl font-nunito-bold text-principal">{usuario}</Text>
       </View>
 
       <View className="flex-row gap-2 mb-6">
-        <View className="flex-1 rounded-xl p-4 items-center bg-[#0a7ea4]">
-          <Text className="text-3xl font-bold text-white">12</Text>
-          <Text className="text-xs text-white mt-1">Empleados</Text>
+        <View className="flex-1 rounded-xl p-4 items-center bg-principal">
+          <Text className="text-3xl font-nunito-bold text-white">12</Text>
+          <Text className="text-xs font-nunito text-white mt-1">Empleados</Text>
         </View>
-        <View className="flex-1 rounded-xl p-4 items-center bg-[#1d8348]">
-          <Text className="text-3xl font-bold text-white">8</Text>
-          <Text className="text-xs text-white mt-1">En turno</Text>
+        <View className="flex-1 rounded-xl p-4 items-center bg-exito">
+          <Text className="text-3xl font-nunito-bold text-white">8</Text>
+          <Text className="text-xs font-nunito text-white mt-1">En turno</Text>
         </View>
-        <View className="flex-1 rounded-xl p-4 items-center bg-[#b9770e]">
-          <Text className="text-3xl font-bold text-white">3</Text>
-          <Text className="text-xs text-white mt-1">Novedades</Text>
+        <View className="flex-1 rounded-xl p-4 items-center bg-acento">
+          <Text className="text-3xl font-nunito-bold text-principal">3</Text>
+          <Text className="text-xs font-nunito text-principal mt-1">Novedades</Text>
         </View>
       </View>
 
-      <Text className="text-sm font-bold text-[#475569] mb-3 uppercase">Acciones rapidas</Text>
+      <Text className="text-sm font-nunito-bold text-neutro mb-3 uppercase">Acciones rapidas</Text>
 
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Cargar turno</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Cargar turno</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Registrar novedad</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Registrar novedad</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Ver liquidaciones</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Ver liquidaciones</Text>
       </Pressable>
 
-      <Pressable className="bg-[#e74c3c] rounded-lg p-4 mt-6" onPress={handleLogout}>
-        <Text className="text-base text-white">Cerrar sesion</Text>
+      <Pressable className="bg-error rounded-lg p-4 mt-6" onPress={handleLogout}>
+        <Text className="text-base font-nunito-semi text-white">Cerrar sesion</Text>
       </Pressable>
     </ScrollView>
   );

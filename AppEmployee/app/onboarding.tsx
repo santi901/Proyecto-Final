@@ -4,6 +4,7 @@ import { Animated, Dimensions, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { marcarOnboardingVisto } from '../auth';
+import { Paleta } from '@/constants/theme';
 
 const { width: WIDTH } = Dimensions.get('window');
 
@@ -47,11 +48,11 @@ export default function OnboardingScreen() {
   }
 
   return (
-    <View className="flex-1 bg-[#1a1a1a]" style={{ paddingTop: insets.top, paddingBottom: insets.bottom + 12 }}>
+    <View className="flex-1 bg-fondo" style={{ paddingTop: insets.top, paddingBottom: insets.bottom + 12 }}>
       {/* Saltar */}
       <View className="flex-row justify-end px-5 pt-2">
         <Pressable onPress={terminar} className="py-2 px-2 active:opacity-60">
-          <Text className="text-[#94a3b8] text-sm font-semibold">Saltar</Text>
+          <Text className="text-neutro text-sm font-nunito-semi">Saltar</Text>
         </Pressable>
       </View>
 
@@ -75,11 +76,11 @@ export default function OnboardingScreen() {
           return (
             <View key={s.titulo} style={{ width: WIDTH }} className="items-center justify-center px-9">
               <Animated.View style={{ opacity, transform: [{ scale }] }} className="items-center">
-                <View className="w-36 h-36 rounded-full bg-[#FFD942] items-center justify-center mb-10">
-                  <MaterialIcons name={s.icon} size={72} color="#1a1a1a" />
+                <View className="w-36 h-36 rounded-full bg-acento items-center justify-center mb-10">
+                  <MaterialIcons name={s.icon} size={72} color={Paleta.principal} />
                 </View>
-                <Text className="text-white text-3xl font-black text-center mb-4">{s.titulo}</Text>
-                <Text className="text-[#cbd5e1] text-base text-center leading-6">{s.texto}</Text>
+                <Text className="text-principal text-3xl font-nunito-bold text-center mb-4">{s.titulo}</Text>
+                <Text className="text-neutro text-base font-nunito text-center leading-6">{s.texto}</Text>
               </Animated.View>
             </View>
           );
@@ -95,7 +96,7 @@ export default function OnboardingScreen() {
           return (
             <Animated.View
               key={s.titulo}
-              style={{ width: ancho, opacity, height: 8, borderRadius: 4, backgroundColor: '#FFD942' }}
+              style={{ width: ancho, opacity, height: 8, borderRadius: 4, backgroundColor: Paleta.principal }}
             />
           );
         })}
@@ -105,8 +106,8 @@ export default function OnboardingScreen() {
       <View className="px-9">
         <Pressable
           onPress={siguiente}
-          className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90">
-          <Text className="text-[#1a1a1a] text-base font-extrabold">
+          className="bg-principal rounded-xl py-4 items-center active:opacity-90">
+          <Text className="text-white text-base font-nunito-bold">
             {esUltima ? 'Empezar' : 'Siguiente'}
           </Text>
         </Pressable>

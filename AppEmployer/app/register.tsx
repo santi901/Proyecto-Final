@@ -16,6 +16,7 @@ import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleador } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
+import { Paleta } from '@/constants/theme';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -210,7 +211,7 @@ if (
     if (soloNumeros.length <= 4) return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2)}`;
     return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
   }
-  const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
+  const inputClass = 'bg-white rounded-[10px] px-4 py-3.5 mb-4 text-base text-principal border border-neutro font-nunito';
   async function buscarCoordenadas(direccion: string) {
     if (direccion.length < 5) return;
     try {
@@ -231,7 +232,7 @@ if (
   }
   return (
     <ScrollView
-      className="flex-1 bg-[#1a1a1a]"
+      className="flex-1 bg-fondo"
       contentContainerStyle={{
         paddingHorizontal: 28,
         paddingTop: insets.top + 24,
@@ -240,58 +241,58 @@ if (
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}>
       <View className="flex-row items-center gap-2.5 mb-7">
-        <View className="w-11 h-11 rounded-xl bg-[#FFD942] items-center justify-center">
-          <Text className="text-2xl font-black text-[#1a1a1a]">C</Text>
+        <View className="w-11 h-11 rounded-xl bg-acento items-center justify-center">
+          <Text className="text-2xl font-nunito-bold text-principal">C</Text>
         </View>
-        <Text className="text-[13px] font-bold tracking-[2px] text-[#FFD942]">EMPLOYER</Text>
+        <Text className="text-[13px] font-nunito-bold tracking-[2px] text-principal">EMPLOYER</Text>
       </View>
 
       {paso === 1 ? (
         <>
-          <Text className="text-3xl font-bold text-white mb-1">
+          <Text className="text-3xl font-nunito-bold text-principal mb-1">
             Creá tu cuenta en{'\n'}
-            <Text className="text-[#FFD942]">ChanguitApp</Text> Employer
+            ChanguitApp Employer
           </Text>
           <Pressable onPress={() => router.replace('/')} className="mb-7">
-            <Text className="text-sm text-[#94a3b8]">
-              ¿Ya tenés una cuenta? <Text className="text-[#FFD942] font-semibold">Iniciá sesión</Text>
+            <Text className="text-sm text-neutro font-nunito">
+              ¿Ya tenés una cuenta? <Text className="text-principal font-nunito-semi">Iniciá sesión</Text>
             </Text>
           </Pressable>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor={Paleta.neutro}
             value={form.email} onChangeText={v => actualizar('email', v)}
             autoCapitalize="none" keyboardType="email-address"
             autoComplete="off" textContentType="none" importantForAutofill="no"
             autoCorrect={false} spellCheck={false} />
 
-          <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor={Paleta.neutro}
             value={form.password} onChangeText={v => actualizar('password', v)} secureTextEntry />
 
-          <TextInput className={inputClass} placeholder="Volvé a ingresar tu contraseña" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Volvé a ingresar tu contraseña" placeholderTextColor={Paleta.neutro}
             value={form.password2} onChangeText={v => actualizar('password2', v)} secureTextEntry />
 
-          <Text className="text-base font-bold text-white mt-2 mb-3">Datos personales</Text>
+          <Text className="text-base font-nunito-bold text-principal mt-2 mb-3">Datos personales</Text>
 
-          <TextInput className={inputClass} placeholder="Nombre/s" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Nombre/s" placeholderTextColor={Paleta.neutro}
             value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
 
-          <TextInput className={inputClass} placeholder="Apellido/s" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Apellido/s" placeholderTextColor={Paleta.neutro}
             value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
-          <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor={Paleta.neutro}
             value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', formatearFecha(v))}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor={Paleta.neutro}
             value={form.dni} onChangeText={v => actualizar('dni', v)}
             keyboardType="numeric" />
 
-          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={irAlPaso2}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
+            <Text className="text-white text-base font-nunito-bold">Siguiente</Text>
           </Pressable>
         </>
       ) : paso === 2 ? (
@@ -310,44 +311,44 @@ if (
                 { scale: transAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
               ],
             }}
-            className="w-28 h-28 rounded-full bg-[#FFD942] items-center justify-center mb-8">
-            <MaterialIcons name="celebration" size={56} color="#1a1a1a" />
+            className="w-28 h-28 rounded-full bg-acento items-center justify-center mb-8">
+            <MaterialIcons name="celebration" size={56} color={Paleta.principal} />
           </Animated.View>
 
-          <Text className="text-4xl font-black text-white text-center mb-3">
+          <Text className="text-4xl font-nunito-bold text-principal text-center mb-3">
             ¡Ya casi{'\n'}
-            <Text className="text-[#FFD942]">estamos!</Text>
+            estamos!
           </Text>
 
-          <Text className="text-base text-[#cbd5e1] text-center leading-6 mb-2 px-2">
+          <Text className="text-base text-neutro text-center leading-6 mb-2 px-2 font-nunito">
             Solo falta un paso más.
           </Text>
-          <Text className="text-sm text-[#94a3b8] text-center leading-5 mb-10 px-2">
+          <Text className="text-sm text-neutro text-center leading-5 mb-10 px-2 font-nunito">
             Vamos a cargar tu dirección para que los trabajadores sepan dónde es el trabajo.
           </Text>
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90"
+            className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90"
             onPress={() => setPaso(3)}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Continuar</Text>
+            <Text className="text-white text-base font-nunito-bold">Continuar</Text>
           </Pressable>
 
           <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
-            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+            <Text className="text-neutro text-sm underline font-nunito">Volver</Text>
           </Pressable>
         </Animated.View>
       ) : (
         <>
-          <Text className="text-3xl font-bold text-white mb-1">Ya falta poco</Text>
-          <Text className="text-sm text-[#94a3b8] mb-7">
+          <Text className="text-3xl font-nunito-bold text-principal mb-1">Ya falta poco</Text>
+          <Text className="text-sm text-neutro mb-7 font-nunito">
             Te pedimos solo un poco más de paciencia
           </Text>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu código postal" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Ingresá tu código postal" placeholderTextColor={Paleta.neutro}
             value={form.codigo_postal} onChangeText={v => actualizar('codigo_postal', v)}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="Dirección" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Dirección" placeholderTextColor={Paleta.neutro}
             value={form.direccion}
             onChangeText={v => {
               actualizar('direccion', v);
@@ -385,42 +386,42 @@ if (
             </View>
           )}
 
-          <TextInput className={inputClass} placeholder="Piso / Departamento (Opcional)" placeholderTextColor="#64748b"
+          <TextInput className={inputClass} placeholder="Piso / Departamento (Opcional)" placeholderTextColor={Paleta.neutro}
             value={form.piso_departamento} onChangeText={v => actualizar('piso_departamento', v)} />
 
-          <TextInput className={`${inputClass} h-20`} style={{ textAlignVertical: 'top' }}
-            placeholder="Indicaciones (Opcional)" placeholderTextColor="#64748b"
+          <TextInput className={`${inputClass} h-20 font-nunito`} style={{ textAlignVertical: 'top' }}
+            placeholder="Indicaciones (Opcional)" placeholderTextColor={Paleta.neutro}
             value={form.indicaciones} onChangeText={v => actualizar('indicaciones', v)}
             multiline numberOfLines={3} />
 
           <Pressable
-            className="bg-[#262626] rounded-[10px] py-3.5 items-center mb-2 border-[1.5px] border-[#FFD942] active:opacity-70"
+            className="bg-white rounded-[10px] py-3.5 items-center mb-2 border-[1.5px] border-principal active:opacity-70"
             onPress={seleccionarFoto}>
-            <Text className="text-[#FFD942] text-[15px] font-semibold">
+            <Text className="text-principal text-[15px] font-nunito-semi">
               {fotoPerfil ? '✓ Foto de perfil seleccionada' : 'Foto de perfil (Opcional)'}
             </Text>
           </Pressable>
           {fotoPerfil && <Image source={{ uri: fotoPerfil }} className="w-full h-44 rounded-[10px] mb-4" />}
 
-          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={handleRegistro}
             disabled={cargando}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">
+            <Text className="text-white text-base font-nunito-bold">
               {cargando ? 'Creando cuenta...' : 'Crear cuenta'}
             </Text>
           </Pressable>
 
-          <Text className="text-[11px] text-[#64748b] text-center mt-4 leading-4">
+          <Text className="text-[11px] text-neutro text-center mt-4 leading-4 font-nunito">
             Al crear una cuenta automáticamente aceptás nuestra{' '}
-            <Text className="underline">política de privacidad</Text> y{' '}
-            <Text className="underline">acuerdo de usuario</Text>
+            <Text className="underline font-nunito">política de privacidad</Text> y{' '}
+            <Text className="underline font-nunito">acuerdo de usuario</Text>
           </Text>
 
           <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
-            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+            <Text className="text-neutro text-sm underline font-nunito">Volver</Text>
           </Pressable>
         </>
       )}

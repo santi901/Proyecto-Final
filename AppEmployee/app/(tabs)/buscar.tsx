@@ -17,6 +17,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import MapaUbicacion from '../../components/mapa-ubicacion';
+import ModalSolicitud from '../../components/modal-solicitud';
+import { listarDisponibles, aceptarTrabajo, type Trabajo } from '../../lib/trabajo';
+import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 
@@ -80,6 +83,60 @@ export default function BuscarTrabajoScreen() {
     return () => { activo = false; };
   }, [router]);
 
+  // ----- Búsqueda de trabajo y solicitud entrante -----
+  const [buscando, setBuscando] = useState(false);
+  const [solicitud, setSolicitud] = useState<Trabajo | null>(null);
+  const [aceptando, setAceptando] = useState(false);
+  const [errorBusqueda, setErrorBusqueda] = useState('');
+  // Trabajos que el trabajador ya rechazó: no se los volvemos a ofrecer en esta sesión.
+  const rechazados = useRef<Set<string>>(new Set());
+
+  // Mientras está buscando y no hay una solicitud en pantalla, consulta al backend
+  // cada 4 segundos si apareció algún trabajo disponible.
+  useEffect(() => {
+    if (!buscando || solicitud) return;
+
+    let activo = true;
+
+    async function consultar() {
+      try {
+        const trabajos = await listarDisponibles();
+        if (!activo) return;
+        const proximo = trabajos.find(t => !rechazados.current.has(t.id));
+        if (proximo) setSolicitud(proximo);
+        setErrorBusqueda('');
+      } catch (e: any) {
+        if (activo) setErrorBusqueda(e?.message ?? 'No pudimos buscar trabajos.');
+      }
+    }
+
+    consultar();
+    const reloj = setInterval(consultar, 4000);
+    return () => { activo = false; clearInterval(reloj); };
+  }, [buscando, solicitud]);
+
+  async function handleAceptar(trabajo: Trabajo) {
+    setAceptando(true);
+    try {
+      await aceptarTrabajo(trabajo.id);
+      setSolicitud(null);
+      setBuscando(false);
+      router.push({ pathname: '/trabajo-en-curso', params: { trabajoId: trabajo.id } } as any);
+    } catch (e: any) {
+      // Si otro trabajador lo tomó primero, se descarta y se sigue buscando.
+      rechazados.current.add(trabajo.id);
+      setSolicitud(null);
+      setErrorBusqueda(e?.message ?? 'No pudimos aceptar el trabajo.');
+    } finally {
+      setAceptando(false);
+    }
+  }
+
+  function handleRechazar() {
+    if (solicitud) rechazados.current.add(solicitud.id);
+    setSolicitud(null);
+  }
+
   // ----- Panel de perfil (se desliza desde el costado) -----
   const panelX = useRef(new Animated.Value(PANEL_WIDTH)).current;
 
@@ -128,19 +185,19 @@ export default function BuscarTrabajoScreen() {
   if (accesoBloqueado) {
     return (
       <View
-        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        className="flex-1 bg-fondo items-center justify-center px-8"
         style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
-        <View className="w-20 h-20 rounded-full bg-[#262626] items-center justify-center mb-5">
-          <MaterialIcons name="gpp-maybe" size={42} color="#FFD942" />
+        <View className="w-20 h-20 rounded-full bg-acento items-center justify-center mb-5">
+          <MaterialIcons name="gpp-maybe" size={42} color={Paleta.principal} />
         </View>
-        <Text className="text-white text-xl font-bold text-center mb-2">Tu cuenta no está verificada</Text>
-        <Text className="text-[#94a3b8] text-sm text-center mb-7 leading-5">
+        <Text className="text-principal text-xl font-nunito-bold text-center mb-2">Tu cuenta no está verificada</Text>
+        <Text className="text-neutro text-sm font-nunito text-center mb-7 leading-5">
           Para usar ChanguitApp necesitás verificar tu identidad con tu DNI y una selfie. Todavía no pudimos confirmarla.
         </Text>
         <Pressable
           onPress={handleLogout}
-          className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90">
-          <Text className="text-[#1a1a1a] text-base font-extrabold">Cerrar sesión</Text>
+          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
+          <Text className="text-white text-base font-nunito-bold">Cerrar sesión</Text>
         </Pressable>
       </View>
     );
@@ -149,10 +206,10 @@ export default function BuscarTrabajoScreen() {
   // ----- Mientras se resuelve el permiso de ubicación -----
   if (ubicEstado === 'cargando') {
     return (
-      <View className="flex-1 bg-[#1a1a1a] items-center justify-center px-8">
-        <ActivityIndicator size="large" color="#FFD942" />
-        <Text className="text-white text-base font-semibold mt-4">Obteniendo tu ubicación…</Text>
-        <Text className="text-[#94a3b8] text-sm text-center mt-1">
+      <View className="flex-1 bg-fondo items-center justify-center px-8">
+        <ActivityIndicator size="large" color={Paleta.principal} />
+        <Text className="text-principal text-base font-nunito-semi mt-4">Obteniendo tu ubicación…</Text>
+        <Text className="text-neutro text-sm font-nunito text-center mt-1">
           Necesitamos saber dónde estás para mostrarte trabajos cerca.
         </Text>
       </View>
@@ -164,15 +221,15 @@ export default function BuscarTrabajoScreen() {
     const denegado = ubicEstado === 'denegado';
     return (
       <View
-        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        className="flex-1 bg-fondo items-center justify-center px-8"
         style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
-        <View className="w-20 h-20 rounded-full bg-[#262626] items-center justify-center mb-5">
-          <MaterialIcons name="location-off" size={40} color="#FFD942" />
+        <View className="w-20 h-20 rounded-full bg-acento items-center justify-center mb-5">
+          <MaterialIcons name="location-off" size={40} color={Paleta.principal} />
         </View>
-        <Text className="text-white text-xl font-bold text-center mb-2">
+        <Text className="text-principal text-xl font-nunito-bold text-center mb-2">
           {denegado ? 'Necesitamos tu ubicación' : 'No pudimos obtener tu ubicación'}
         </Text>
-        <Text className="text-[#94a3b8] text-sm text-center mb-7 leading-5">
+        <Text className="text-neutro text-sm font-nunito text-center mb-7 leading-5">
           {denegado
             ? 'ChanguitApp usa tu ubicación para mostrarte trabajos cercanos y compartir tu posición con el empleador. Sin este permiso no podés usar la búsqueda.'
             : errorUbic || 'Revisá que el GPS esté activado e intentá de nuevo.'}
@@ -180,13 +237,13 @@ export default function BuscarTrabajoScreen() {
 
         <Pressable
           onPress={() => iniciarUbicacion(usuarioId)}
-          className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90 mb-3">
-          <Text className="text-[#1a1a1a] text-base font-extrabold">Reintentar</Text>
+          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mb-3">
+          <Text className="text-white text-base font-nunito-bold">Reintentar</Text>
         </Pressable>
 
         {denegado && (
           <Pressable onPress={() => Linking.openSettings()} className="py-2 items-center">
-            <Text className="text-[#FFD942] text-sm font-semibold underline">
+            <Text className="text-principal text-sm font-nunito-semi underline">
               Abrir configuración del teléfono
             </Text>
           </Pressable>
@@ -197,7 +254,7 @@ export default function BuscarTrabajoScreen() {
 
   // ----- Permiso OK: pantalla principal con el mapa de fondo -----
   return (
-    <View className="flex-1 bg-[#e5e7eb]">
+    <View className="flex-1 bg-fondo">
       {/* Fondo del mapa con la ubicación actual del trabajador */}
       {coords && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
@@ -209,17 +266,17 @@ export default function BuscarTrabajoScreen() {
       <View
         className="absolute left-0 right-0 flex-row items-center justify-between px-5"
         style={{ top: insets.top + 8 }}>
-        <View className="w-11 h-11 rounded-full bg-[#FFD942] items-center justify-center">
-          <MaterialIcons name="place" size={24} color="#1a1a1a" />
+        <View className="w-11 h-11 rounded-full bg-acento items-center justify-center">
+          <MaterialIcons name="place" size={24} color={Paleta.principal} />
         </View>
         <View className="flex-row gap-3">
-          <View className="w-11 h-11 rounded-full bg-white items-center justify-center border border-[#e2e8f0]">
-            <MaterialIcons name="chat-bubble-outline" size={22} color="#475569" />
+          <View className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro">
+            <MaterialIcons name="chat-bubble-outline" size={22} color={Paleta.principal} />
           </View>
           <Pressable
             onPress={abrirPerfil}
-            className="w-11 h-11 rounded-full bg-white items-center justify-center border border-[#e2e8f0] active:opacity-70">
-            <MaterialIcons name="person-outline" size={24} color="#475569" />
+            className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">
+            <MaterialIcons name="person-outline" size={24} color={Paleta.principal} />
           </Pressable>
         </View>
       </View>
@@ -232,7 +289,7 @@ export default function BuscarTrabajoScreen() {
           right: 0,
           bottom: tabBarHeight,
           height: SHEET_HEIGHT,
-          backgroundColor: '#ffffff',
+          backgroundColor: Paleta.blanco,
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
           transform: [{ translateY }],
@@ -244,8 +301,8 @@ export default function BuscarTrabajoScreen() {
         }}>
         {/* Cabecera arrastrable */}
         <View {...pan.panHandlers} className="items-center pt-3 pb-2">
-          <View className="w-10 h-1.5 rounded-full bg-[#cbd5e1] mb-1" />
-          <MaterialIcons name="keyboard-arrow-down" size={26} color="#94a3b8" />
+          <View className="w-10 h-1.5 rounded-full bg-neutro mb-1" />
+          <MaterialIcons name="keyboard-arrow-down" size={26} color={Paleta.neutro} />
         </View>
 
         <ScrollView
@@ -262,10 +319,10 @@ export default function BuscarTrabajoScreen() {
                   key={i}
                   onPress={() => setSeleccion(i)}
                   className={`w-[31%] aspect-[4/3] rounded-xl mb-3 border ${
-                    sel ? 'border-[#FFD942] bg-[#fff8da]' : 'border-[#e2e8f0] bg-[#f1f5f9]'
+                    sel ? 'border-principal bg-acento' : 'border-neutro bg-fondo-suave'
                   }`}>
-                  <View className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-[#94a3b8] items-center justify-center">
-                    <Text className="text-white text-[9px] font-bold">i</Text>
+                  <View className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-principal items-center justify-center">
+                    <Text className="text-white text-[9px] font-nunito-bold">i</Text>
                   </View>
                 </Pressable>
               );
@@ -274,22 +331,47 @@ export default function BuscarTrabajoScreen() {
 
           {/* Ayuda + Método de cobro */}
           <View className="flex-row gap-3 mb-6">
-            <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-[#e2e8f0] bg-white active:opacity-70">
-              <Text className="text-[15px] text-[#475569] font-medium">Ayuda</Text>
+            <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
+              <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
             </Pressable>
 
-            <Pressable className="flex-1 flex-row items-center justify-between bg-[#f1f5f9] rounded-[10px] px-4 py-3 border border-[#e2e8f0]">
-              <Text className="text-base text-[#64748b]">Método de cobro</Text>
-              <MaterialIcons name="keyboard-arrow-down" size={22} color="#475569" />
+            <Pressable className="flex-1 flex-row items-center justify-between bg-fondo-suave rounded-[10px] px-4 py-3 border border-neutro">
+              <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
+              <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
             </Pressable>
           </View>
 
+          {errorBusqueda ? (
+            <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorBusqueda}</Text>
+          ) : null}
+
           {/* Botón principal */}
-          <Pressable className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90">
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Buscar Trabajo</Text>
+          <Pressable
+            onPress={() => { setErrorBusqueda(''); setBuscando(b => !b); }}
+            className={`rounded-xl py-4 items-center active:opacity-90 ${
+              buscando ? 'bg-white border-[1.5px] border-principal' : 'bg-principal'
+            }`}>
+            {buscando ? (
+              <View className="flex-row items-center gap-2">
+                <ActivityIndicator size="small" color={Paleta.principal} />
+                <Text className="text-principal text-base font-nunito-bold">
+                  Buscando trabajos… (tocá para cancelar)
+                </Text>
+              </View>
+            ) : (
+              <Text className="text-white text-base font-nunito-bold">Buscar Trabajo</Text>
+            )}
           </Pressable>
         </ScrollView>
       </Animated.View>
+
+      {/* Solicitud entrante con timer */}
+      <ModalSolicitud
+        trabajo={aceptando ? null : solicitud}
+        onAceptar={handleAceptar}
+        onRechazar={handleRechazar}
+        onVencer={handleRechazar}
+      />
 
       {/* Panel de perfil (se despliega desde el costado) */}
       {perfilAbierto && (
@@ -305,7 +387,7 @@ export default function BuscarTrabajoScreen() {
               bottom: 0,
               right: 0,
               width: PANEL_WIDTH,
-              backgroundColor: '#1a1a1a',
+              backgroundColor: Paleta.principal,
               transform: [{ translateX: panelX }],
               paddingTop: insets.top + 16,
               paddingHorizontal: 20,
@@ -317,34 +399,36 @@ export default function BuscarTrabajoScreen() {
               elevation: 20,
             }}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-white text-lg font-bold">Mi perfil</Text>
+              <Text className="text-white text-lg font-nunito-bold">Mi perfil</Text>
               <Pressable onPress={cerrarPerfil} className="p-1 active:opacity-70">
-                <MaterialIcons name="close" size={24} color="#94a3b8" />
+                <MaterialIcons name="close" size={24} color={Paleta.blanco} />
               </Pressable>
             </View>
 
             <View className="items-center mb-6">
-              <View className="w-20 h-20 rounded-full bg-[#FFD942] items-center justify-center mb-3">
-                <Text className="text-3xl font-black text-[#1a1a1a]">
+              <View className="w-20 h-20 rounded-full bg-acento items-center justify-center mb-3">
+                <Text className="text-3xl font-nunito-bold text-principal">
                   {usuario ? usuario[0].toUpperCase() : 'U'}
                 </Text>
               </View>
-              <Text className="text-white text-base font-semibold" numberOfLines={1}>{usuario}</Text>
-              <Text className="text-[#94a3b8] text-xs mt-1">Trabajador</Text>
+              <Text className="text-white text-base font-nunito-semi" numberOfLines={1}>{usuario}</Text>
+              <Text className="text-white/70 text-xs font-nunito mt-1">Trabajador</Text>
             </View>
 
-            <View className="border-t border-[#3a3a3a] pt-2">
-              <Pressable className="flex-row items-center py-3.5 active:opacity-70">
-                <MaterialIcons name="person-outline" size={22} color="#cbd5e1" />
-                <Text className="text-[#cbd5e1] text-[15px] ml-3">Mi cuenta</Text>
+            <View className="border-t border-white/20 pt-2">
+              <Pressable
+                onPress={() => { cerrarPerfil(); router.push('/perfil' as any); }}
+                className="flex-row items-center py-3.5 active:opacity-70">
+                <MaterialIcons name="person-outline" size={22} color={Paleta.blanco} />
+                <Text className="text-white text-[15px] font-nunito ml-3">Mi cuenta</Text>
               </Pressable>
               <Pressable className="flex-row items-center py-3.5 active:opacity-70">
-                <MaterialIcons name="settings" size={22} color="#cbd5e1" />
-                <Text className="text-[#cbd5e1] text-[15px] ml-3">Configuración</Text>
+                <MaterialIcons name="settings" size={22} color={Paleta.blanco} />
+                <Text className="text-white text-[15px] font-nunito ml-3">Configuración</Text>
               </Pressable>
               <Pressable className="flex-row items-center py-3.5 active:opacity-70">
-                <MaterialIcons name="help-outline" size={22} color="#cbd5e1" />
-                <Text className="text-[#cbd5e1] text-[15px] ml-3">Ayuda</Text>
+                <MaterialIcons name="help-outline" size={22} color={Paleta.blanco} />
+                <Text className="text-white text-[15px] font-nunito ml-3">Ayuda</Text>
               </Pressable>
             </View>
 
@@ -352,9 +436,9 @@ export default function BuscarTrabajoScreen() {
 
             <Pressable
               onPress={handleLogout}
-              className="flex-row items-center justify-center py-3.5 rounded-xl border border-[#e74c3c] active:opacity-70">
-              <MaterialIcons name="logout" size={20} color="#e74c3c" />
-              <Text className="text-[#e74c3c] text-[15px] font-semibold ml-2">Cerrar sesión</Text>
+              className="flex-row items-center justify-center py-3.5 rounded-xl bg-acento active:opacity-70">
+              <MaterialIcons name="logout" size={20} color={Paleta.principal} />
+              <Text className="text-principal text-[15px] font-nunito-bold ml-2">Cerrar sesión</Text>
             </Pressable>
           </Animated.View>
         </>

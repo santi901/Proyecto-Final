@@ -42,29 +42,29 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView
-      className="flex-1 bg-[#f1f5f9]"
+      className="flex-1 bg-fondo"
       contentContainerStyle={{ padding: 16, paddingTop: insets.top + 24, paddingBottom: 24 }}>
       <View className="mb-5">
-        <Text className="text-base text-[#475569]">Hola,</Text>
-        <Text className="text-2xl font-bold text-[#0f172a]">{usuario}</Text>
+        <Text className="text-base font-nunito text-neutro">Hola,</Text>
+        <Text className="text-2xl font-nunito-bold text-principal">{usuario}</Text>
       </View>
 
-      <View className={`rounded-xl p-4 mb-3 ${fichado ? 'bg-[#1d8348]' : 'bg-[#64748b]'}`}>
-        <Text className="text-white text-xs opacity-85">Estado actual</Text>
-        <Text className="text-white text-lg font-bold mt-1">
+      <View className={`rounded-xl p-4 mb-3 ${fichado ? 'bg-exito' : 'bg-principal'}`}>
+        <Text className="text-white text-xs font-nunito opacity-85">Estado actual</Text>
+        <Text className="text-white text-lg font-nunito-bold mt-1">
           {fichado ? `Trabajando desde ${horaIngreso}` : 'Fuera de turno'}
         </Text>
       </View>
 
       <Pressable
-        className={`rounded-xl p-5 items-center mb-7 active:opacity-90 ${fichado ? 'bg-[#e74c3c]' : 'bg-[#1d8348]'}`}
+        className={`rounded-xl p-5 items-center mb-7 active:opacity-90 ${fichado ? 'bg-error' : 'bg-principal'}`}
         onPress={fichar}>
-        <Text className="text-white text-lg font-bold tracking-wider">
+        <Text className="text-white text-lg font-nunito-bold tracking-wider">
           {fichado ? 'Fichar SALIDA' : 'Fichar ENTRADA'}
         </Text>
       </Pressable>
 
-      <Text className="text-sm font-bold text-[#475569] mb-3 uppercase">Mi semana</Text>
+      <Text className="text-sm font-nunito-bold text-neutro mb-3 uppercase">Mi semana</Text>
 
       <View className="flex-row justify-between mb-6">
         {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d, i) => {
@@ -75,12 +75,15 @@ export default function DashboardScreen() {
               key={i}
               className={`w-10 h-10 rounded-full items-center justify-center border ${
                 trabajado
-                  ? 'bg-[#1d8348] border-[#1d8348]'
+                  ? 'bg-principal border-principal'
                   : actual
-                  ? 'bg-[#0a7ea4] border-[#0a7ea4]'
-                  : 'bg-white border-[#e2e8f0]'
+                  ? 'bg-acento border-acento'
+                  : 'bg-white border-neutro'
               }`}>
-              <Text className={`text-sm font-semibold ${trabajado || actual ? 'text-white' : 'text-[#475569]'}`}>
+              <Text
+                className={`text-sm font-nunito-semi ${
+                  trabajado ? 'text-white' : 'text-principal'
+                }`}>
                 {d}
               </Text>
             </View>
@@ -88,20 +91,20 @@ export default function DashboardScreen() {
         })}
       </View>
 
-      <Text className="text-sm font-bold text-[#475569] mb-3 uppercase">Accesos</Text>
+      <Text className="text-sm font-nunito-bold text-neutro mb-3 uppercase">Accesos</Text>
 
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Mi horario</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Mi horario</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Solicitar dia</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Solicitar dia</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-[#e2e8f0]" onPress={() => {}}>
-        <Text className="text-base text-[#0f172a]">Mis novedades</Text>
+      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+        <Text className="text-base font-nunito text-principal">Mis novedades</Text>
       </Pressable>
 
-      <Pressable className="bg-[#e74c3c] rounded-lg p-4 mt-6" onPress={handleLogout}>
-        <Text className="text-base text-white">Cerrar sesion</Text>
+      <Pressable className="bg-error rounded-lg p-4 mt-6" onPress={handleLogout}>
+        <Text className="text-base font-nunito-semi text-white">Cerrar sesion</Text>
       </Pressable>
     </ScrollView>
   );

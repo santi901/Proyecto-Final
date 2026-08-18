@@ -34,6 +34,23 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
   }
 }
 
+// Sigue la posición del trabajador mientras va al trabajo y llama a `alMoverse` cada
+// vez que cambia. Devuelve una función para cortar el seguimiento (hay que llamarla
+// al desmontar la pantalla, si no el GPS queda prendido).
+export async function seguirUbicacion(
+  alMoverse: (coords: Coordenadas) => void,
+): Promise<() => void> {
+  const { status } = await Location.requestForegroundPermissionsAsync();
+  if (status !== 'granted') return () => {};
+
+  const suscripcion = await Location.watchPositionAsync(
+    { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+    pos => alMoverse({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+  );
+
+  return () => suscripcion.remove();
+}
+
 // Envía las coordenadas al backend de Nacho para que las guarde en la base de datos.
 // Contrato a acordar con backend: POST /location  body { userId, lat, lng }
 // (el endpoint todavía no existe en Nacho-Back; el front ya queda listo para cuando exista)
