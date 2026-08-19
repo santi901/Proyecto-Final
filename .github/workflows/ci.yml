@@ -1,0 +1,179 @@
+name: CI/CD
+
+# Se dispara en cada push a main y en cada PR contra main.
+# El orden es lint -> tests -> build -> deploy y cada etapa depende de la anterior
+# (`needs`): si el lint falla no se corren los tests, y si algo falla no se despliega.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias de la app del trabajador
+        run: npm ci
+        working-directory: AppEmployee
+
+      - name: Lint de la app del trabajador
+        run: npm run lint
+        working-directory: AppEmployee
+
+      - name: Instalar dependencias de la app del empleador
+        run: npm ci
+        working-directory: AppEmployer
+
+      - name: Lint de la app del empleador
+        run: npm run lint
+        working-directory: AppEmployer
+
+      - name: Instalar dependencias del backend de Ignacio
+        run: npm ci
+        working-directory: backend-nacho
+
+      # Sin --fix: en CI el lint tiene que reportar, no arreglar por su cuenta.
+      - name: Lint del backend de Ignacio
+        run: npx eslint "{src,test}/**/*.ts"
+        working-directory: backend-nacho
+
+  test:
+    name: Tests
+    needs: lint
+    runs-on: ubuntu-latest
+
+    # Los secrets no se pueden evaluar dentro de un `if`, asi que se mapean a env
+    # y los pasos preguntan por env.
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests unitarios
+        run: npm run test:unit
+
+      - name: Cobertura de la logica de negocio
+        run: npm run test:coverage
+
+      # ── E2E ────────────────────────────────────────────────────────────────
+      # Le pega al backend levantado de verdad, que necesita una base Supabase.
+      # Si los secrets no estan cargados el paso se saltea con un warning visible:
+      # preferimos eso a un E2E que finge pasar contra un mock.
+      - name: Levantar el backend
+        if: env.SUPABASE_URL != ''
+        # nohup para que el proceso sobreviva al final de este step y siga vivo
+        # cuando corre el step del E2E.
+        run: |
+          nohup node backend/server.js > backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "Backend arriba"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "El backend no respondio en 30s. Log:"
+          cat backend.log
+          exit 1
+
+      - name: Tests E2E del flujo del trabajo
+        if: env.SUPABASE_URL != ''
+        env:
+          E2E_BASE_URL: http://localhost:3000
+        run: npm run test:e2e
+
+      - name: Aviso si el E2E no corrio
+        if: env.SUPABASE_URL == ''
+        run: echo "::warning title=E2E salteado::Falta el secret SUPABASE_URL, asi que el E2E del flujo del trabajo no corrio. Ver CALIDAD.md."
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias de la app del trabajador
+        run: npm ci
+        working-directory: AppEmployee
+
+      # expo export arma el bundle real de produccion: si algo no resuelve, rompe aca.
+      - name: Bundle de la app del trabajador
+        run: npx expo export --platform android --output-dir dist
+        working-directory: AppEmployee
+
+      - name: Typecheck de la app del trabajador
+        run: npx tsc --noEmit
+        working-directory: AppEmployee
+
+      - name: Instalar dependencias de la app del empleador
+        run: npm ci
+        working-directory: AppEmployer
+
+      - name: Bundle de la app del empleador
+        run: npx expo export --platform android --output-dir dist
+        working-directory: AppEmployer
+
+      - name: Typecheck de la app del empleador
+        run: npx tsc --noEmit
+        working-directory: AppEmployer
+
+      - name: Instalar dependencias del backend de Ignacio
+        run: npm ci
+        working-directory: backend-nacho
+
+      - name: Build del backend de Ignacio
+        run: npm run build
+        working-directory: backend-nacho
+
+  deploy:
+    name: Deploy a produccion
+    needs: build
+    # Solo en push a main: un PR nunca despliega. Y `needs: build` garantiza que
+    # lint, tests y build hayan pasado.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Desplegar el backend a Vercel
+        if: env.VERCEL_TOKEN != ''
+        run: npx vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+
+      - name: Aviso si el deploy no corrio
+        if: env.VERCEL_TOKEN == ''
+        run: echo "::warning title=Deploy salteado::Faltan los secrets de Vercel (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID). Ver el README."

@@ -19,6 +19,8 @@ import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 import { crearTrabajo } from '../../lib/trabajo';
+import { CATEGORIAS } from '../../lib/categorias';
+import { DIFICULTADES, precioPara, type Dificultad } from '../../lib/precios';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -29,16 +31,6 @@ const PEEK = 250; // parte visible del panel cuando está abajo
 const COLLAPSED = SHEET_HEIGHT - PEEK; // translateY cuando está bajado
 const PANEL_WIDTH = Math.round(SCREEN_W * 0.78);
 
-const CATEGORIAS = ['Limpieza', 'Mudanza', 'Jardín', 'Pintura', 'Plomería', 'Otros'];
-const DIFICULTADES = ['Simple', 'Intermedio', 'Complejo'] as const;
-
-// El precio lo fija la app según la dificultad: no se negocia con el trabajador.
-const PRECIOS: Record<typeof DIFICULTADES[number], number> = {
-  Simple: 2500,
-  Intermedio: 4500,
-  Complejo: 7000,
-};
-
 export default function OfrecerTrabajoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -47,7 +39,7 @@ export default function OfrecerTrabajoScreen() {
   const [titulo, setTitulo] = useState('Nuevo Trabajo');
   const [descripcion, setDescripcion] = useState('');
   const [categoria, setCategoria] = useState<number | null>(null);
-  const [dificultad, setDificultad] = useState<typeof DIFICULTADES[number] | null>(null);
+  const [dificultad, setDificultad] = useState<Dificultad | null>(null);
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
@@ -97,7 +89,7 @@ export default function OfrecerTrabajoScreen() {
   const [publicando, setPublicando] = useState(false);
   const [errorPublicar, setErrorPublicar] = useState('');
 
-  const precio = dificultad ? PRECIOS[dificultad] : null;
+  const precio = precioPara(dificultad);
 
   // Publica el trabajo y salta al seguimiento. El PIN viaja por parámetro porque el
   // backend lo devuelve una sola vez, acá: no hay forma de volver a pedirlo después.

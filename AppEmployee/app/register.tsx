@@ -240,7 +240,7 @@ export default function RegisterScreen() {
         return;
       }
 
-    } catch (e: any) {
+    } catch {
       setVerifMensaje('No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.');
       setVerifEstado('rechazado');
       setCargando(false);

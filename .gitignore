@@ -1,4 +1,13 @@
-./node_modules
-
 node_modules/
 .env
+.env.local
+
+# Reportes de cobertura (se regeneran con `npm run test:coverage`)
+coverage/
+
+# Bundles de Expo y build de NestJS
+dist/
+backend-nacho/dist/
+
+# Vercel
+.vercel
