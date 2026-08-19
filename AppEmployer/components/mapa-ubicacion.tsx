@@ -25,8 +25,8 @@ export default function MapaUbicacion({ lat, lng }: Props) {
           .setView([${lat}, ${lng}], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         // Punto "estás acá" con halo, estilo Cabify/Uber
-        L.circle([${lat}, ${lng}], { radius: 90, color: '#FFD942', fillColor: '#FFD942', fillOpacity: 0.18, weight: 1 }).addTo(map);
-        L.circleMarker([${lat}, ${lng}], { radius: 9, color: '#ffffff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
+        L.circle([${lat}, ${lng}], { radius: 90, color: '#FFD539', fillColor: '#FFD539', fillOpacity: 0.18, weight: 1 }).addTo(map);
+        L.circleMarker([${lat}, ${lng}], { radius: 9, color: '#ffffff', weight: 3, fillColor: '#0C1531', fillOpacity: 1 }).addTo(map);
       </script>
     </body>
     </html>

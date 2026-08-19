@@ -66,6 +66,25 @@ async function post(path: string, body: object, token?: string) {
   return data;
 }
 
+// Llamadas autenticadas al backend de Nico: agregan solas el token guardado.
+// Las usa `lib/trabajo.ts` para todo el flujo de solicitud / PIN / finalización.
+
+export async function apiGet(path: string) {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Error del servidor');
+  return data;
+}
+
+export async function apiPost(path: string, body: object = {}) {
+  const token = await getAccessToken();
+  return post(path, body, token ?? undefined);
+}
+
 // ── Auth functions ────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string) {
