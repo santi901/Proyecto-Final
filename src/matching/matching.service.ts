@@ -11,6 +11,7 @@ export interface TrabajadorDisponible {
   userId: string;
   nombre: string;
   apellido: string;
+  reputacion: number;
   distanciaKm: number;
 }
 
@@ -46,7 +47,12 @@ export class MatchingService {
       .eq('id', trabajo.empleador_id)
       .maybeSingle();
 
-    if (empleadorError || !empleador || empleador.lat == null || empleador.lng == null) {
+    if (
+      empleadorError ||
+      !empleador ||
+      empleador.lat == null ||
+      empleador.lng == null
+    ) {
       throw new BadRequestException(
         'El empleador de este trabajo no tiene una ubicación cargada.',
       );
@@ -54,7 +60,9 @@ export class MatchingService {
 
     const { data: candidatos, error: candidatosError } = await this.supabase
       .from('empleados')
-      .select('id, user_id, nombre, apellido, lat, lng, radio_busqueda, categorias')
+      .select(
+        'id, user_id, nombre, apellido, lat, lng, radio_busqueda, categorias, reputacion',
+      )
       .contains('categorias', [trabajo.categoria])
       .not('lat', 'is', null)
       .not('lng', 'is', null);
@@ -74,7 +82,9 @@ export class MatchingService {
       throw new BadRequestException('Error al verificar disponibilidad.');
     }
 
-    const idsOcupados = new Set((ocupados ?? []).map((t) => t.trabajador_id as string));
+    const idsOcupados = new Set(
+      (ocupados ?? []).map((t) => t.trabajador_id as string),
+    );
 
     return (candidatos ?? [])
       .filter((candidato) => !idsOcupados.has(candidato.id as string))
@@ -83,8 +93,11 @@ export class MatchingService {
         userId: candidato.user_id as string,
         nombre: candidato.nombre as string,
         apellido: candidato.apellido as string,
+        reputacion: (candidato.reputacion as number) ?? 0,
         radioMaximoKm:
-          radioKm ?? (candidato.radio_busqueda as number) ?? RADIO_BUSQUEDA_DEFAULT_KM,
+          radioKm ??
+          (candidato.radio_busqueda as number) ??
+          RADIO_BUSQUEDA_DEFAULT_KM,
         distanciaKm: calcularDistanciaKm(
           empleador.lat as number,
           empleador.lng as number,
@@ -93,12 +106,15 @@ export class MatchingService {
         ),
       }))
       .filter((candidato) => candidato.distanciaKm <= candidato.radioMaximoKm)
-      .sort((a, b) => a.distanciaKm - b.distanciaKm)
-      .map(({ id, userId, nombre, apellido, distanciaKm }) => ({
+      .sort(
+        (a, b) => b.reputacion - a.reputacion || a.distanciaKm - b.distanciaKm,
+      )
+      .map(({ id, userId, nombre, apellido, reputacion, distanciaKm }) => ({
         id,
         userId,
         nombre,
         apellido,
+        reputacion,
         distanciaKm: parseFloat(distanciaKm.toFixed(2)),
       }));
   }

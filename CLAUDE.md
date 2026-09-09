@@ -34,29 +34,55 @@ Standard Nest module-per-feature layout, wired in `src/app.module.ts`:
 src/main.ts                        bootstrap, CORS enabled, listens on process.env.PORT ?? 3000
 src/verificacion/                  identity verification (DNI + selfie face match)
 src/location/                      geocoding, distance/fuel-cost estimation, live location upsert
+src/matching/                      worker matching by category, availability, distance and reputation
+src/notificaciones/                push notifications (Expo) + notification log
+src/evidencia/                     job-completion evidence photo upload/listing
+src/calificaciones/                post-job ratings + reputation recalculation
+src/supabase/                      global Supabase client provider (service-role key)
 prisma/schema.prisma               present but has no models defined yet — not in active use
 ```
 
-`package.json` also lists deps not used by any module yet (`socket.io`/`@nestjs/websockets`, `firebase-admin`, `@vladmandic/face-api`, `canvas`, `passport`/`passport-jwt`, `@prisma/client`) — only `VerificacionModule` and `LocationModule` are active.
+`package.json` also lists deps not used by any module yet (`socket.io`/`@nestjs/websockets`, `firebase-admin`, `@vladmandic/face-api`, `canvas`, `passport`/`passport-jwt`, `@prisma/client`).
 
 ### Verificación (`src/verificacion`)
 
-`POST /verificacion/comparar-caras` accepts 2 multipart files under the field name `imagenes` (`[dni, selfie]`), rejects identical-byte uploads, then:
-1. `TextractService.validarDni` runs AWS Textract `DetectDocumentTextCommand` on the DNI image and checks the detected text for a keyword allowlist (`ARGENTINA`, `DNI`, `IDENTIDAD`, etc.) to reject non-ID images.
-2. `StorageService.guardarImagen` uploads both images to S3 (`AWS_BUCKET_NAME`), keyed `${userId}/${tipo}-${uuid}.jpg`, regardless of match outcome.
-3. `VerificacionService.compararCaras` runs AWS Rekognition `CompareFacesCommand` with `SimilarityThreshold: 80` on the API call, but only declares `coinciden: true` above 90% similarity in the response — the 80% and 90% thresholds are intentionally different (80% is just what AWS returns candidates for).
+`POST /verificacion/comparar-caras` accepts 2 multipart files under the field names `dni` and `selfie`, rejects identical-byte uploads, then:
+1. `StorageService.guardarImagen` uploads both images to S3 (`AWS_BUCKET_NAME`), keyed `${userId}/${tipo}-${uuid}.jpg`, regardless of match outcome. `StorageService` is exported from `VerificacionModule` and reused by `EvidenciaModule` (tipo `'evidencia'`, keyed by `trabajoId` instead of `userId`).
+2. `VerificacionService.compararCaras` runs AWS Rekognition `CompareFacesCommand` with `SimilarityThreshold: 80` on the API call, but only declares `coinciden: true` above 90% similarity in the response — the 80% and 90% thresholds are intentionally different (80% is just what AWS returns candidates for).
+
+There used to be a Textract step (`TextractService.validarDni`) that OCR'd the DNI to check for ID keywords before running Rekognition — it was removed (AWS Textract requires a paid plan, same limitation that hit Textract in `backend/`). No document-authenticity check exists today; only the face match runs.
 
 ### Location (`src/location`)
 
-`GET /location/calcular-viaje` geocodes two free-text addresses via the public Nominatim (OpenStreetMap) API (no key, but a `User-Agent` header is required or requests get rejected) and returns haversine distance plus an estimated ARS fuel cost using fixed constants `PRECIO_NAFTA_ARS` / `RENDIMIENTO_KM_POR_LITRO` in `location.service.ts`.
+`GET /location/calcular-viaje` geocodes two free-text addresses via the public Nominatim (OpenStreetMap) API (no key, but a `User-Agent` header is required or requests get rejected) and returns haversine distance plus an estimated ARS fuel cost using fixed constants `PRECIO_NAFTA_ARS` / `RENDIMIENTO_KM_POR_LITRO` in `location.service.ts` (`calcularDistanciaKm` itself lives in `haversine.util.ts` and is reused by `matching/`).
 
 `POST /location/actualizar-ubicacion` upserts live coordinates into the Supabase `worker_locations` table (using `SUPABASE_ANON_KEY`, not the service key) and, if a `jobId` is passed, also returns remaining distance/cost to that job's stored `lat`/`lng` from the `jobs` table.
 
 Both routes are unauthenticated at the Nest layer — no guards are registered on `LocationController` or `VerificacionController`.
 
+### Matching (`src/matching`)
+
+`GET /matching/trabajadores-disponibles?trabajoId=&radioKm=` finds `empleados` whose `categorias` include the job's `categoria`, within `radioKm` (or the worker's own `radio_busqueda`, default 10km) of the *employer's* stored lat/lng (jobs don't store their own coordinates — the employer's `perfiles` row is used instead), excluding workers currently tied to a job in `asignado`/`en_progreso`. Results are sorted by `reputacion` descending, distance ascending as the tiebreaker. This endpoint is server-to-server only — no app calls it directly yet.
+
+### Notificaciones (`src/notificaciones`)
+
+`POST /notificaciones` sends an Expo push notification and always logs it to the `notificaciones` table first as `'pendiente'`, then updates the row to `'enviado'`/`'fallido'` after attempting the push — so a row exists even if the push itself fails or the recipient never registered a token. `POST /notificaciones/registrar-token` upserts an Expo push token into `push_tokens` keyed by `usuario_id`. `GET /notificaciones?destinatarioId=` lists a user's notification history, most recent first. No app currently installs `expo-notifications` or calls `registrar-token`, so pushes are logged but never actually delivered end-to-end yet.
+
+### Evidencia (`src/evidencia`)
+
+`POST /trabajos/:trabajoId/evidencia` (multipart field `foto`, body field `subidoPor`) uploads a completion photo via `StorageService` and inserts a row into `evidencias_trabajo` (`trabajo_id`, `s3_key`, `subido_por`, `creado_en`). `GET /trabajos/:trabajoId/evidencia` lists them, most recent first. Nothing in either app calls this yet.
+
+### Calificaciones (`src/calificaciones`)
+
+`POST /calificaciones` (`trabajoId`, `calificadorId`, `calificadoId`, `puntaje` 1-5, optional `comentario`) requires the referenced `trabajos` row to be in state `'completado'`, inserts into `calificaciones`, then recalculates and writes the average `puntaje` back to `empleados.reputacion` for `calificadoId` — this desnormalized average is what `matching/` sorts by, so it doesn't have to aggregate on every match query. `GET /calificaciones?empleadoId=` lists an employee's rating history, most recent first. Nothing in either app calls this yet.
+
+### Supabase (`src/supabase`)
+
+`SupabaseModule` is `@Global()` and exports a single `SUPABASE_CLIENT` token (created with `SUPABASE_SERVICE_KEY`, not the anon key) that `matching/`, `notificaciones/`, `evidencia/`, and `calificaciones/` all inject via `@Inject(SUPABASE_CLIENT)`. This is separate from `location/`'s own direct Supabase client, which is built inline with `SUPABASE_ANON_KEY`.
+
 ### Config
 
-Reads from `.env` via `ConfigModule.forRoot({ isGlobal: true })`: `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
+Reads from `.env` via `ConfigModule.forRoot({ isGlobal: true })`: `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
 
 Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` recommendedTypeChecked + `eslint-plugin-prettier`; `@typescript-eslint/no-explicit-any` is off, `no-floating-promises`/`no-unsafe-argument` are warnings not errors. Prettier: single quotes, trailing commas everywhere (`.prettierrc`).
 

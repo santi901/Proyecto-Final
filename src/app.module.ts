@@ -7,6 +7,8 @@ import { LocationModule } from './location/location.module';
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { MatchingModule } from './matching/matching.module';
+import { EvidenciaModule } from './evidencia/evidencia.module';
+import { CalificacionesModule } from './calificaciones/calificaciones.module';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { MatchingModule } from './matching/matching.module';
     LocationModule,
     NotificacionesModule,
     MatchingModule,
+    EvidenciaModule,
+    CalificacionesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
