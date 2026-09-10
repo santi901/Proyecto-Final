@@ -36,7 +36,7 @@ async function registrarEmpleado(req, res) {
     email, password,
     nombre, apellido, fechaNacimiento, dni,
     codigoPostal, direccion, radioBusqueda,
-    fotoUrl, fotoDniUrl, lat, lng,
+    fotoUrl, fotoDniUrl, lat, lng, categorias,
   } = req.body
 
   if (!email || !password || !nombre || !apellido || !fechaNacimiento || !dni || !codigoPostal || !direccion) {
@@ -84,6 +84,7 @@ async function registrarEmpleado(req, res) {
     foto_dni_url:   fotoDniUrl ?? null,
     lat:            lat ?? null,
     lng:            lng ?? null,
+    categorias:     Array.isArray(categorias) ? categorias : [],
   })
 
   if (perfilErr) {

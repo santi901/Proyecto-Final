@@ -110,16 +110,19 @@ export default function RegisterScreen() {
       return;
     }
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
     setPaso(2);
@@ -161,19 +164,22 @@ export default function RegisterScreen() {
     }
   
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
-  
+
     const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
   
     setCargando(true);

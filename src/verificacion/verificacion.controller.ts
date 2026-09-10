@@ -2,7 +2,6 @@ import { Controller, Post, UploadedFiles, UseInterceptors, Body, BadRequestExcep
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { VerificacionService } from './verificacion.service';
 import { StorageService } from './storage.service';
-import { TextractService } from './textract.service';
 
 @Controller('verificacion')
 export class VerificacionController {
@@ -10,7 +9,6 @@ export class VerificacionController {
   constructor(
     private readonly verificacionService: VerificacionService,
     private readonly storageService: StorageService,
-    private readonly textractService: TextractService,
   ) {}
 
   @Post('comparar-caras')
@@ -32,8 +30,6 @@ export class VerificacionController {
     if (dni.buffer.equals(selfie.buffer)) {
       throw new BadRequestException('El DNI y la selfie no pueden ser la misma imagen.');
     }
-
-    await this.textractService.validarDni(dni.buffer);
 
     const userId_ = userId ?? 'sin-id';
 
