@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { misTrabajosPublicados, obtenerPinLocal, completarTrabajo, type Trabajo } from '../../lib/trabajos';
+import { alertaSimple } from '../../lib/alerta';
 
 const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
   pendiente: 'Pendiente',
@@ -55,10 +56,10 @@ export default function MisTrabajosScreen() {
     setCompletandoId(id);
     try {
       const { message } = await completarTrabajo(id);
-      Alert.alert('Trabajo completado', message);
+      alertaSimple('Trabajo completado', message);
       cargar();
     } catch (e: any) {
-      Alert.alert('No se pudo completar', e.message || 'Intentá de nuevo.');
+      alertaSimple('No se pudo completar', e.message || 'Intentá de nuevo.');
     } finally {
       setCompletandoId(null);
     }

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Linking,
@@ -14,11 +13,12 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useBottomTabBarHeight } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
+import { alertaSimple } from '../../lib/alerta';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -137,7 +137,7 @@ export default function OfrecerTrabajoScreen() {
 
       await guardarPinLocal(trabajo.id, pin);
 
-      Alert.alert(
+      alertaSimple(
         'Trabajo publicado',
         `Compartí este PIN con el trabajador cuando llegue, para que pueda iniciar el trabajo:\n\n${pin}\n\nTambién lo podés volver a ver en "Mis trabajos".`,
       );

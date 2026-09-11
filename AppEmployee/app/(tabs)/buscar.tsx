@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Linking,
@@ -13,11 +12,12 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useBottomTabBarHeight } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos';
+import { alertaSimple } from '../../lib/alerta';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -133,9 +133,9 @@ export default function BuscarTrabajoScreen() {
     try {
       const { message } = await aceptarTrabajo(id);
       setTrabajos(prev => prev?.filter(t => t.id !== id) ?? prev);
-      Alert.alert('Trabajo aceptado', message);
+      alertaSimple('Trabajo aceptado', message);
     } catch (e: any) {
-      Alert.alert('No se pudo aceptar', e.message || 'Intentá de nuevo.');
+      alertaSimple('No se pudo aceptar', e.message || 'Intentá de nuevo.');
     } finally {
       setAceptandoId(null);
     }

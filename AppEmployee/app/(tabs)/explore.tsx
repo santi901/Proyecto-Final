@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { misTrabajosAsignados, validarPin, completarTrabajo, type Trabajo } from '../../lib/trabajos';
+import { alertaSimple } from '../../lib/alerta';
 
 const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
   pendiente: 'Pendiente',
@@ -43,18 +44,18 @@ export default function MiTrabajoScreen() {
   async function handleValidarPin(id: string) {
     const pin = (pinInputs[id] || '').trim();
     if (pin.length !== 6) {
-      Alert.alert('PIN inválido', 'El PIN tiene 6 dígitos.');
+      alertaSimple('PIN inválido', 'El PIN tiene 6 dígitos.');
       return;
     }
 
     setValidandoId(id);
     try {
       const { message } = await validarPin(id, pin);
-      Alert.alert('Trabajo iniciado', message);
+      alertaSimple('Trabajo iniciado', message);
       setPinInputs((s) => ({ ...s, [id]: '' }));
       cargar();
     } catch (e: any) {
-      Alert.alert('PIN incorrecto', e.message || 'Intentá de nuevo.');
+      alertaSimple('PIN incorrecto', e.message || 'Intentá de nuevo.');
     } finally {
       setValidandoId(null);
     }
@@ -64,10 +65,10 @@ export default function MiTrabajoScreen() {
     setCompletandoId(id);
     try {
       const { message } = await completarTrabajo(id);
-      Alert.alert('Trabajo completado', message);
+      alertaSimple('Trabajo completado', message);
       cargar();
     } catch (e: any) {
-      Alert.alert('No se pudo completar', e.message || 'Intentá de nuevo.');
+      alertaSimple('No se pudo completar', e.message || 'Intentá de nuevo.');
     } finally {
       setCompletandoId(null);
     }
