@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
 import { API_URL, getAccessToken } from '../auth';
+import { fetchConTimeout } from './fetchConTimeout';
 
 const INTERVALO_UBICACION_MS = 10000;
 
@@ -36,7 +37,7 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
 // POST /api/ubicacion/actualizar-ubicacion  body { workerId, lat, lng, jobId? }  (requiere sesión)
 export async function enviarUbicacion(coords: Coordenadas, workerId: string, jobId?: string): Promise<void> {
   const token = await getAccessToken();
-  const res = await fetch(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
+  const res = await fetchConTimeout(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

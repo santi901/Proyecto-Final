@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL, getAccessToken } from '../auth';
+import { fetchConTimeout } from './fetchConTimeout';
 
 export type Trabajo = {
   id: string;
@@ -16,7 +17,7 @@ export type Trabajo = {
 
 async function authFetch(path: string, options: RequestInit = {}) {
   const token = await getAccessToken();
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetchConTimeout(`${API_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
