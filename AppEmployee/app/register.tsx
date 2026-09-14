@@ -233,7 +233,8 @@ export default function RegisterScreen() {
       }
 
     } catch (e: any) {
-      setVerifMensaje('No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.');
+      console.error('Error en verificación (detalle técnico):', e);
+      setVerifMensaje(`No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.\n\n[debug: ${e?.name || 'Error'}: ${e?.message || String(e)}]`);
       setVerifEstado('rechazado');
       setCargando(false);
       return;
