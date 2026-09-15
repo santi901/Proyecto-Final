@@ -21,6 +21,10 @@ export interface EvidenciaRow {
   creado_en: string;
 }
 
+export interface EvidenciaConUrl extends EvidenciaRow {
+  url: string;
+}
+
 @Injectable()
 export class EvidenciaService {
   constructor(
@@ -32,7 +36,7 @@ export class EvidenciaService {
     trabajoId: string,
     subidoPor: string,
     foto: Buffer,
-  ): Promise<EvidenciaRow> {
+  ): Promise<EvidenciaConUrl> {
     if (!trabajoId) {
       throw new BadRequestException('trabajoId es requerido.');
     }
@@ -61,10 +65,11 @@ export class EvidenciaService {
       throw new BadRequestException('Error al registrar la evidencia.');
     }
 
-    return data;
+    const url = await this.storageService.obtenerUrlFirmada(data.s3_key);
+    return { ...data, url };
   }
 
-  async listarEvidencia(trabajoId: string): Promise<EvidenciaRow[]> {
+  async listarEvidencia(trabajoId: string): Promise<EvidenciaConUrl[]> {
     if (!trabajoId) {
       throw new BadRequestException('trabajoId es requerido.');
     }
@@ -80,6 +85,11 @@ export class EvidenciaService {
       throw new BadRequestException('Error al obtener la evidencia.');
     }
 
-    return data ?? [];
+    return Promise.all(
+      (data ?? []).map(async (fila) => ({
+        ...fila,
+        url: await this.storageService.obtenerUrlFirmada(fila.s3_key),
+      })),
+    );
   }
 }

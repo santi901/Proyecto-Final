@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
+
+const URL_FIRMADA_EXPIRA_SEGUNDOS = 3600;
 
 @Injectable()
 export class StorageService {
@@ -33,5 +40,18 @@ export class StorageService {
     await this.s3.send(comando);
 
     return nombreArchivo;
+  }
+
+  // El bucket es privado, así que la app necesita una URL firmada (temporal)
+  // para poder mostrar la imagen — la key sola (s3_key) no es accesible.
+  async obtenerUrlFirmada(key: string): Promise<string> {
+    const comando = new GetObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+    });
+
+    return getSignedUrl(this.s3, comando, {
+      expiresIn: URL_FIRMADA_EXPIRA_SEGUNDOS,
+    });
   }
 }
