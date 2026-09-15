@@ -1,8 +1,11 @@
 const supabase = require('../config/supabase')
 const { calcularDistanciaKm } = require('../utils/haversine')
+const { guardarUbicacionEfimera, obtenerUbicacionEfimera } = require('../services/ubicacionCacheService')
+const { emitirUbicacion } = require('../realtime/socket')
 
 const PRECIO_NAFTA_ARS = 2070
 const RENDIMIENTO_KM_POR_LITRO = 13
+const ESTADOS_TRABAJO_ACTIVO = ['asignado', 'en_progreso']
 
 async function geocodificar(direccion) {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(direccion)}&format=json&limit=1`
@@ -71,17 +74,30 @@ async function actualizarUbicacion(req, res) {
     return res.status(500).json({ error: 'Error al guardar la ubicación.' })
   }
 
+  // Sprint 4 — almacenamiento efímero en Redis, además del upsert de arriba
+  // (que queda como está). Best-effort: si Redis no está disponible esto no
+  // frena la respuesta (ver services/ubicacionCacheService.js).
+  guardarUbicacionEfimera(workerId, lat, lng)
+
   if (!jobId) return res.json({ mensaje: 'Ubicación actualizada' })
 
   const { data: job, error: jobError } = await supabase
     .from('trabajos')
-    .select('latitud, longitud')
+    .select('latitud, longitud, estado')
     .eq('id', jobId)
     .single()
 
   if (jobError || !job) {
     console.error(`No se encontró el trabajo jobId=${jobId} al actualizar ubicación de workerId=${workerId}: ${jobError?.message ?? 'sin datos'}`)
     return res.status(404).json({ error: 'No se encontró el trabajo.' })
+  }
+
+  // Sprint 4 — WebSocket en tiempo real: mientras el trabajo está activo, se
+  // comparte la ubicación por la room `trabajo:{jobId}` (ver realtime/socket.js).
+  // Al completar/cancelar el trabajo se deja de emitir (emitirFinTrabajo saca a
+  // todos de la room), así que no hace falta chequear el estado ahí también.
+  if (ESTADOS_TRABAJO_ACTIVO.includes(job.estado)) {
+    emitirUbicacion(jobId, { workerId, lat, lng, ts: Date.now() })
   }
 
   const distanciaKm = calcularDistanciaKm(lat, lng, job.latitud, job.longitud)
@@ -97,4 +113,15 @@ async function actualizarUbicacion(req, res) {
   })
 }
 
-module.exports = { calcularViaje, actualizarUbicacion }
+// Fallback por si el cliente no está conectado por WebSocket (o se perdió el
+// evento): última ubicación conocida desde el cache efímero de Redis.
+async function obtenerUbicacionCache(req, res) {
+  const { workerId } = req.params
+
+  const ubicacion = await obtenerUbicacionEfimera(workerId)
+  if (!ubicacion) return res.status(404).json({ error: 'No hay ubicación reciente para este trabajador.' })
+
+  res.json({ ubicacion })
+}
+
+module.exports = { calcularViaje, actualizarUbicacion, obtenerUbicacionCache }

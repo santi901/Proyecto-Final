@@ -1,6 +1,7 @@
 require('dotenv').config()
 const express = require('express')
 const cors    = require('cors')
+const http    = require('http')
 
 const authRoutes         = require('./src/routes/auth')
 const empleadosRoutes    = require('./src/routes/empleados')
@@ -9,6 +10,8 @@ const trabajosRoutes     = require('./src/routes/trabajos')
 const verificacionRoutes = require('./src/routes/verificacion')
 const ubicacionRoutes    = require('./src/routes/ubicacion')
 const errorHandler       = require('./src/middleware/errorHandler')
+const { configurarSocket } = require('./src/realtime/socket')
+const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
 
 const app  = express()
 const PORT = process.env.PORT || 3000
@@ -27,7 +30,13 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
 app.use(errorHandler)
 
-app.listen(PORT, () => {
+// http.Server explícito (en vez de app.listen) porque socket.io necesita
+// engancharse al mismo servidor HTTP que Express (Sprint 4 — WebSocket).
+const httpServer = http.createServer(app)
+configurarSocket(httpServer)
+iniciarReasignacionAutomatica()
+
+httpServer.listen(PORT, () => {
   console.log(`ChanguitApp backend corriendo en http://localhost:${PORT}`)
 })
 
