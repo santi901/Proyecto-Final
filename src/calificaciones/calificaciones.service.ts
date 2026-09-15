@@ -75,6 +75,18 @@ export class CalificacionesService {
     }
 
     const {
+      data: calificacionExistente,
+    }: SupabaseSingleResult<{ id: string }> = await this.supabase
+      .from('calificaciones')
+      .select('id')
+      .eq('trabajo_id', trabajoId)
+      .maybeSingle();
+
+    if (calificacionExistente) {
+      throw new BadRequestException('Este trabajo ya fue calificado.');
+    }
+
+    const {
       data: calificacion,
       error: insertError,
     }: SupabaseSingleResult<CalificacionRow> = await this.supabase

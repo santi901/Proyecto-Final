@@ -97,4 +97,57 @@ async function actualizarUbicacion(req, res) {
   })
 }
 
-module.exports = { calcularViaje, actualizarUbicacion }
+// GET /api/trabajos/:id/ubicacion-trabajador — para que el mapa del empleador
+// pueda mostrar al trabajador en camino. Solo el empleador dueño del trabajo
+// puede pedirla. worker_locations.worker_id es un usuarios.id, pero
+// trabajos.trabajador_id es un empleados.id — hay que cruzarlos por
+// empleados.user_id antes de buscar la ubicación.
+async function obtenerUbicacionTrabajador(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+
+  const { data: trabajo } = await supabase
+    .from('trabajos')
+    .select('id, trabajador_id, empleador_id')
+    .eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!perfil || trabajo.empleador_id !== perfil.id) {
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+
+  if (!trabajo.trabajador_id) {
+    return res.status(400).json({ error: 'Este trabajo todavía no tiene un trabajador asignado' })
+  }
+
+  const { data: empleado } = await supabase
+    .from('empleados').select('user_id').eq('id', trabajo.trabajador_id).maybeSingle()
+
+  if (!empleado) {
+    console.error(`Ubicación de trabajador no encontrada (trabajoId=${trabajoId}): empleado trabajador_id=${trabajo.trabajador_id} no existe.`)
+    return res.status(404).json({ error: 'No se encontró el trabajador asignado' })
+  }
+
+  const { data: ubicacion, error } = await supabase
+    .from('worker_locations')
+    .select('lat, lng, updated_at')
+    .eq('worker_id', empleado.user_id)
+    .maybeSingle()
+
+  if (error) {
+    console.error(`Error obteniendo ubicación del trabajador (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error al obtener la ubicación.' })
+  }
+
+  if (!ubicacion) {
+    return res.status(404).json({ error: 'El trabajador todavía no compartió su ubicación.' })
+  }
+
+  res.json({ lat: ubicacion.lat, lng: ubicacion.lng, actualizadoEn: ubicacion.updated_at })
+}
+
+module.exports = { calcularViaje, actualizarUbicacion, obtenerUbicacionTrabajador }

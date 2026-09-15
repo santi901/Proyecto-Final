@@ -11,11 +11,18 @@ const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
 async function notificar(destinatarioId, { tipo, mensaje, titulo, trabajoId }) {
   if (!destinatarioId) return
   try {
-    await fetch(`${NACHO_API_URL}/notificaciones`, {
+    const respuesta = await fetch(`${NACHO_API_URL}/notificaciones`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ destinatarioId, tipo, mensaje, titulo, trabajoId }),
     })
+    // fetch no rechaza en un status de error HTTP, solo en error de red — sin
+    // este chequeo, un 400 de Nacho (ej. destinatarioId inválido) se pierde
+    // en silencio y no queda rastro de que la notificación no se guardó.
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '')
+      console.error(`Notificación rechazada por Nacho (destinatarioId=${destinatarioId}, tipo=${tipo}): ${respuesta.status} ${detalle}`)
+    }
   } catch (error) {
     console.error('Error mandando notificación:', error.message)
   }
@@ -366,21 +373,42 @@ async function calificarTrabajo(req, res) {
     return res.status(400).json({ error: 'Este trabajo no tiene trabajador asignado' })
   }
 
-  res.json({ message: 'Calificación enviada' })
+  // Un trabajo se califica una sola vez. A diferencia de notificar(), esto NO
+  // es fire-and-forget: si no chequeamos esto acá (y esperamos la respuesta
+  // de Nacho más abajo), no hay forma de que el usuario sepa que su
+  // calificación se perdió o que ya había calificado este trabajo antes.
+  const { data: yaCalificado } = await supabase
+    .from('calificaciones').select('id').eq('trabajo_id', trabajoId).maybeSingle()
 
-  // No se espera esta llamada: no debe frenar la respuesta ni fallar si el llamado falla
-  // (mismo patrón que notificar(), líneas 11-22).
-  fetch(`${NACHO_API_URL}/calificaciones`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      trabajoId,
-      calificadorId: perfil.id,
-      calificadoId:  trabajo.trabajador_id,
-      puntaje,
-      comentario,
-    }),
-  }).catch((error) => console.error('Error mandando calificación:', error.message))
+  if (yaCalificado) {
+    return res.status(409).json({ error: 'Este trabajo ya fue calificado' })
+  }
+
+  let respuestaNacho
+  try {
+    respuestaNacho = await fetch(`${NACHO_API_URL}/calificaciones`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        trabajoId,
+        calificadorId: perfil.id,
+        calificadoId:  trabajo.trabajador_id,
+        puntaje,
+        comentario,
+      }),
+    })
+  } catch (error) {
+    console.error(`Error mandando calificación (trabajoId=${trabajoId}): ${error.message}`)
+    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+  }
+
+  if (!respuestaNacho.ok) {
+    const detalle = await respuestaNacho.json().catch(() => null)
+    console.error(`Calificación rechazada por Nacho (trabajoId=${trabajoId}): ${respuestaNacho.status} ${detalle?.message ?? ''}`)
+    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+  }
+
+  res.json({ message: 'Calificación enviada' })
 }
 
 module.exports = {
