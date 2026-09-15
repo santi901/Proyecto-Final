@@ -15,10 +15,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleado } from '../auth';
+import { registrarEmpleado, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import { NACHO_API_URL } from '../lib/ubicacion';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -54,7 +53,7 @@ export default function RegisterScreen() {
   const [cargando, setCargando] = useState(false);
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Estado del sistema de verificación de identidad (backend NestJS de Nacho, POST /verificacion/comparar-caras):
+  // Estado del sistema de verificación de identidad (backend único de Express, POST /api/verificacion/comparar-caras):
   // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint
   const [verifEstado, setVerifEstado] = useState<'procesando' | 'aprobado' | 'rechazado' | null>(null);
   const [verifMensaje, setVerifMensaje] = useState('');
@@ -202,22 +201,19 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-
       formData.append('dni', {
         uri: fotoDni!,
         name: `dni-${form.dni}.jpg`,
         type: 'image/jpeg',
       } as any);
-
       formData.append('selfie', {
         uri: fotoPerfil!,
         name: `selfie-${form.dni}.jpg`,
         type: 'image/jpeg',
       } as any);
-
       formData.append('userId', form.dni);
 
-      const verificacion = await fetch(`${NACHO_API_URL}/verificacion/comparar-caras`, {
+      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
         method: 'POST',
         body: formData,
       });
@@ -237,7 +233,8 @@ export default function RegisterScreen() {
       }
 
     } catch (e: any) {
-      setVerifMensaje('No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.');
+      console.error('Error en verificación (detalle técnico):', e);
+      setVerifMensaje(`No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.\n\n[debug: ${e?.name || 'Error'}: ${e?.message || String(e)}]`);
       setVerifEstado('rechazado');
       setCargando(false);
       return;

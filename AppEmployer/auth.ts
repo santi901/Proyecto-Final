@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchConTimeout } from './lib/fetchConTimeout';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -56,7 +57,7 @@ async function post(path: string, body: object, token?: string) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetchConTimeout(`${API_URL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
