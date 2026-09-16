@@ -9,6 +9,7 @@ const trabajosRoutes     = require('./src/routes/trabajos')
 const verificacionRoutes = require('./src/routes/verificacion')
 const ubicacionRoutes    = require('./src/routes/ubicacion')
 const errorHandler       = require('./src/middleware/errorHandler')
+const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
 
 const app  = express()
 const PORT = process.env.PORT || 3000
@@ -26,6 +27,8 @@ app.use('/api/ubicacion',    ubicacionRoutes)
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
 app.use(errorHandler)
+
+iniciarReasignacionAutomatica()
 
 app.listen(PORT, () => {
   console.log(`ChanguitApp backend corriendo en http://localhost:${PORT}`)
