@@ -1,67 +1,16 @@
 const supabase = require('../config/supabase')
 const { generarPin, hashearPin, validarPin } = require('../utils/pin')
+const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
+const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
 
 const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
 
-// Backend NestJS de Nacho (verificación, ubicación, matching, notificaciones).
+// Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí.
 const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
-
-// Nunca debe frenar el flujo del trabajo: si el servicio de notificaciones
-// está caído o el usuario no tiene push token, esto solo loguea y sigue.
-async function notificar(destinatarioId, { tipo, mensaje, titulo, trabajoId }) {
-  if (!destinatarioId) return
-  try {
-    const respuesta = await fetch(`${NACHO_API_URL}/notificaciones`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ destinatarioId, tipo, mensaje, titulo, trabajoId }),
-    })
-    // fetch no rechaza en un status de error HTTP, solo en error de red — sin
-    // este chequeo, un 400 de Nacho (ej. destinatarioId inválido) se pierde
-    // en silencio y no queda rastro de que la notificación no se guardó.
-    if (!respuesta.ok) {
-      const detalle = await respuesta.text().catch(() => '')
-      console.error(`Notificación rechazada por Nacho (destinatarioId=${destinatarioId}, tipo=${tipo}): ${respuesta.status} ${detalle}`)
-    }
-  } catch (error) {
-    console.error('Error mandando notificación:', error.message)
-  }
-}
-
-async function notificarEmpleador(perfilId, payload) {
-  const { data } = await supabase.from('perfiles').select('user_id').eq('id', perfilId).maybeSingle()
-  if (data?.user_id) await notificar(data.user_id, payload)
-}
-
-async function notificarEmpleado(empleadoId, payload) {
-  const { data } = await supabase.from('empleados').select('user_id').eq('id', empleadoId).maybeSingle()
-  if (data?.user_id) await notificar(data.user_id, payload)
-}
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
   return Math.round((new Date(trabajo.finalizado_en) - new Date(trabajo.iniciado_en)) / 1000)
-}
-
-// Le pide a /matching quiénes son los trabajadores que matchean (categoría +
-// distancia + disponibilidad) y les manda la notificación de nueva oferta.
-async function notificarNuevoTrabajo(trabajo) {
-  try {
-    const respuesta = await fetch(
-      `${NACHO_API_URL}/matching/trabajadores-disponibles?trabajoId=${trabajo.id}`,
-    )
-    if (!respuesta.ok) return
-    const candidatos = await respuesta.json()
-
-    await Promise.all(candidatos.map((candidato) => notificar(candidato.userId, {
-      tipo:    'nueva_oferta',
-      titulo:  'Nuevo trabajo disponible',
-      mensaje: `Hay un nuevo trabajo de ${trabajo.categoria} cerca tuyo: "${trabajo.titulo}"`,
-      trabajoId: trabajo.id,
-    })))
-  } catch (error) {
-    console.error('Error buscando trabajadores para notificar:', error.message)
-  }
 }
 
 async function crearTrabajo(req, res) {
@@ -341,6 +290,33 @@ async function completarTrabajo(req, res) {
   }
 }
 
+async function obtenerCandidatos(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+  const { radioKm } = req.query
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de ver candidatos' })
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, empleador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (trabajo.empleador_id !== perfil.id) {
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+
+  try {
+    const candidatos = await buscarTrabajadoresDisponibles(trabajoId, radioKm ? Number(radioKm) : undefined)
+    res.json({ candidatos })
+  } catch (error) {
+    console.error(`Error buscando candidatos (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    res.status(error.status ?? 500).json({ error: error.message ?? 'Error buscando candidatos' })
+  }
+}
+
 // El empleador califica al empleado una vez completado el trabajo (empleados.reputacion
 // se recalcula del lado de Nacho — ver src/calificaciones — así que solo se califica
 // en ese sentido, no al revés).
@@ -414,4 +390,5 @@ async function calificarTrabajo(req, res) {
 module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
+  obtenerCandidatos,
 }
