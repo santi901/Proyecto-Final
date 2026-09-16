@@ -248,7 +248,7 @@ async function completarTrabajo(req, res) {
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, trabajador_id, empleador_id, iniciado_en')
+    .select('id, estado, trabajador_id, empleador_id, iniciado_en, confirmado_empleado_en, confirmado_empleador_en')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -272,14 +272,56 @@ async function completarTrabajo(req, res) {
     }
   }
 
-  const finalizadoEn = new Date().toISOString()
-  await supabase.from('trabajos').update({ estado: 'completado', finalizado_en: finalizadoEn }).eq('id', trabajoId)
+  // No alcanza con que confirme una sola parte: hace falta que las dos
+  // marquen el trabajo como completado antes de cerrarlo.
+  const yaConfirmoEstaParte = tipo === 'empleado' ? trabajo.confirmado_empleado_en : trabajo.confirmado_empleador_en
+  if (yaConfirmoEstaParte) {
+    return res.json({
+      message: 'Ya confirmaste la finalización. Esperando confirmación de la otra parte.',
+      estado: 'en_progreso',
+      esperandoConfirmacion: true,
+    })
+  }
+
+  const ahora = new Date().toISOString()
+  const campoConfirmacion = tipo === 'empleado' ? 'confirmado_empleado_en' : 'confirmado_empleador_en'
+  const otraParteYaConfirmo = tipo === 'empleado' ? trabajo.confirmado_empleador_en : trabajo.confirmado_empleado_en
+
+  if (!otraParteYaConfirmo) {
+    await supabase.from('trabajos').update({ [campoConfirmacion]: ahora }).eq('id', trabajoId)
+
+    res.json({
+      message: 'Confirmaste la finalización. Esperando confirmación de la otra parte.',
+      estado: 'en_progreso',
+      esperandoConfirmacion: true,
+    })
+
+    const payload = {
+      tipo:    'cambio_estado',
+      titulo:  'Confirmación pendiente',
+      mensaje: 'La otra parte marcó el trabajo como completado. Confirmalo vos para cerrarlo.',
+      trabajoId,
+    }
+    if (tipo === 'empleado') {
+      notificarEmpleador(trabajo.empleador_id, payload)
+    } else if (trabajo.trabajador_id) {
+      notificarEmpleado(trabajo.trabajador_id, payload)
+    }
+    return
+  }
+
+  const finalizadoEn = ahora
+  await supabase
+    .from('trabajos')
+    .update({ estado: 'completado', finalizado_en: finalizadoEn, [campoConfirmacion]: ahora })
+    .eq('id', trabajoId)
 
   const duracionSegundos = calcularDuracionSegundos({ ...trabajo, finalizado_en: finalizadoEn })
 
-  res.json({ message: 'Trabajo completado exitosamente', duracionSegundos })
+  res.json({ message: 'Trabajo completado exitosamente', estado: 'completado', duracionSegundos })
 
-  // Se avisa a la otra parte, no a quien acaba de marcar el trabajo como completado.
+  emitirFinTrabajo(trabajoId, { estado: 'completado' })
+
   const payload = {
     tipo:    'cambio_estado',
     titulo:  'Trabajo completado',
