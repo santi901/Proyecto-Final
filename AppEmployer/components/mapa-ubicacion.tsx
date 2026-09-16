@@ -1,4 +1,4 @@
-import { WebView } from 'react-native-webview';
+import MapaHtml from './mapa-html';
 
 type Props = {
   lat: number;
@@ -6,8 +6,9 @@ type Props = {
 };
 
 // Mapa con la ubicación actual del usuario.
-// Usa WebView + Leaflet (mismo patrón que el mapa del registro) para no depender
-// de un dev build ni de una API key de Google Maps, y funcionar en Expo Go.
+// Usa Leaflet dentro de una WebView (nativo) o un <iframe> (web) — ver
+// mapa-html.tsx/mapa-html.web.tsx — para no depender de un dev build ni de
+// una API key de Google Maps, y funcionar en Expo Go y en el navegador.
 export default function MapaUbicacion({ lat, lng }: Props) {
   const html = `
     <!DOCTYPE html>
@@ -32,12 +33,5 @@ export default function MapaUbicacion({ lat, lng }: Props) {
     </html>
   `;
 
-  return (
-    <WebView
-      source={{ html }}
-      style={{ flex: 1 }}
-      scrollEnabled={false}
-      originWhitelist={['*']}
-    />
-  );
+  return <MapaHtml html={html} style={{ flex: 1 }} />;
 }
