@@ -1,6 +1,7 @@
 require('dotenv').config()
 const express = require('express')
 const cors    = require('cors')
+const http    = require('http')
 
 const authRoutes         = require('./src/routes/auth')
 const empleadosRoutes    = require('./src/routes/empleados')
@@ -10,6 +11,7 @@ const verificacionRoutes = require('./src/routes/verificacion')
 const ubicacionRoutes    = require('./src/routes/ubicacion')
 const errorHandler       = require('./src/middleware/errorHandler')
 const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
+const { configurarSocket } = require('./src/realtime/socket')
 
 const app  = express()
 const PORT = process.env.PORT || 3000
@@ -30,7 +32,10 @@ app.use(errorHandler)
 
 iniciarReasignacionAutomatica()
 
-app.listen(PORT, () => {
+const httpServer = http.createServer(app)
+configurarSocket(httpServer)
+
+httpServer.listen(PORT, () => {
   console.log(`ChanguitApp backend corriendo en http://localhost:${PORT}`)
 })
 

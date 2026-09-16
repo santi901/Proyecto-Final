@@ -1,9 +1,11 @@
 const supabase = require('../config/supabase')
 const { calcularDistanciaKm } = require('../utils/haversine')
 const { guardarUbicacionEfimera, obtenerUbicacionEfimera } = require('../services/ubicacionCacheService')
+const { emitirUbicacion } = require('../realtime/socket')
 
 const PRECIO_NAFTA_ARS = 2070
 const RENDIMIENTO_KM_POR_LITRO = 13
+const ESTADOS_TRABAJO_ACTIVO = ['asignado', 'en_progreso']
 
 async function geocodificar(direccion) {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(direccion)}&format=json&limit=1`
@@ -79,13 +81,17 @@ async function actualizarUbicacion(req, res) {
 
   const { data: job, error: jobError } = await supabase
     .from('trabajos')
-    .select('latitud, longitud')
+    .select('latitud, longitud, estado')
     .eq('id', jobId)
     .single()
 
   if (jobError || !job) {
     console.error(`No se encontró el trabajo jobId=${jobId} al actualizar ubicación de workerId=${workerId}: ${jobError?.message ?? 'sin datos'}`)
     return res.status(404).json({ error: 'No se encontró el trabajo.' })
+  }
+
+  if (ESTADOS_TRABAJO_ACTIVO.includes(job.estado)) {
+    emitirUbicacion(jobId, { workerId, lat, lng, ts: Date.now() })
   }
 
   const distanciaKm = calcularDistanciaKm(lat, lng, job.latitud, job.longitud)
