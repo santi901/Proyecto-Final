@@ -2,8 +2,11 @@ const supabase = require('../config/supabase')
 const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
 const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
+const { emitirFinTrabajo } = require('../realtime/socket')
 
 const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
+
+const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
 
 // Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí.
 const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
@@ -290,6 +293,58 @@ async function completarTrabajo(req, res) {
   }
 }
 
+async function cancelarTrabajo(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+  const { motivo } = req.body
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (trabajo.empleador_id !== perfil.id) {
+    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+  if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
+    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
+    return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+  }
+
+  const { error } = await supabase
+    .from('trabajos')
+    .update({
+      estado: 'cancelado',
+      cancelado_por: 'empleador',
+      cancelado_en: new Date().toISOString(),
+      motivo_cancelacion: motivo ?? null,
+    })
+    .eq('id', trabajoId)
+
+  if (error) {
+    console.error(`Error cancelando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error cancelando trabajo' })
+  }
+
+  res.json({ message: 'Trabajo cancelado' })
+
+  emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
+
+  if (trabajo.trabajador_id) {
+    notificarEmpleado(trabajo.trabajador_id, {
+      tipo:    'cambio_estado',
+      titulo:  'Trabajo cancelado',
+      mensaje: 'El empleador canceló este trabajo.',
+      trabajoId,
+    })
+  }
+}
+
 async function obtenerCandidatos(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId } = req.usuario
@@ -390,5 +445,5 @@ async function calificarTrabajo(req, res) {
 module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
-  obtenerCandidatos,
+  obtenerCandidatos, cancelarTrabajo,
 }
