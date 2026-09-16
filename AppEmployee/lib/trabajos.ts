@@ -21,6 +21,8 @@ export type Trabajo = {
   solicitud_expira_en: string | null;
   iniciado_en: string | null;
   finalizado_en: string | null;
+  /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
+  duracionSegundos?: number | null;
 };
 
 /** Tiempo para responder una solicitud entrante, salvo que expire antes. */
@@ -30,6 +32,15 @@ export function segundosParaResponder(trabajo: Trabajo): number {
   if (!trabajo.solicitud_expira_en) return SEGUNDOS_LIMITE_POR_DEFECTO;
   const hastaQueExpira = Math.floor((new Date(trabajo.solicitud_expira_en).getTime() - Date.now()) / 1000);
   return Math.max(1, Math.min(SEGUNDOS_LIMITE_POR_DEFECTO, hastaQueExpira));
+}
+
+// "45 min", "1 h 20 min".
+export function formatearDuracion(segundos: number): string {
+  const minutos = Math.max(1, Math.round(segundos / 60));
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas} h ${resto} min` : `${horas} h`;
 }
 
 // GET /api/trabajos — como empleado, devuelve solo los trabajos en estado 'pendiente'.

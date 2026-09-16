@@ -3,6 +3,10 @@ import { fetchConTimeout } from './lib/fetchConTimeout';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+// Backend de Nacho (NestJS). Solo se usa para lo que el de Nico no expone: registrar el
+// token de notificaciones push y ver la foto de evidencia de un trabajo.
+export const NACHO_API_URL = process.env.EXPO_PUBLIC_NACHO_API_URL ?? 'http://localhost:3001';
+
 const K = {
   ACCESS:  'cg_access_token',
   REFRESH: 'cg_refresh_token',

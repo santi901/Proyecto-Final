@@ -65,3 +65,31 @@ export async function guardarPinLocal(trabajoId: string, pin: string) {
 export async function obtenerPinLocal(trabajoId: string): Promise<string | null> {
   return AsyncStorage.getItem(PIN_KEY_PREFIX + trabajoId);
 }
+
+// POST /api/trabajos/:id/calificar — el empleador califica al trabajador (1 a 5) cuando el
+// trabajo ya está completado. El backend de Nico se la pasa al de Nacho, que recalcula la
+// reputación del trabajador (con eso el matching ordena a los candidatos).
+export async function calificarTrabajo(id: string, puntaje: number, comentario?: string): Promise<{ message: string }> {
+  return apiPost(`/api/trabajos/${id}/calificar`, { puntaje, ...(comentario ? { comentario } : {}) });
+}
+
+// El backend no expone si un trabajo ya se calificó: se recuerda en el dispositivo para no
+// volver a pedir la calificación.
+const CALIFICADO_KEY_PREFIX = 'cg_calificado_trabajo_';
+
+export async function marcarCalificadoLocal(trabajoId: string) {
+  await AsyncStorage.setItem(CALIFICADO_KEY_PREFIX + trabajoId, '1');
+}
+
+export async function yaCalificadoLocal(trabajoId: string): Promise<boolean> {
+  return (await AsyncStorage.getItem(CALIFICADO_KEY_PREFIX + trabajoId)) === '1';
+}
+
+// "45 min", "1 h 20 min".
+export function formatearDuracion(segundos: number): string {
+  const minutos = Math.max(1, Math.round(segundos / 60));
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas} h ${resto} min` : `${horas} h`;
+}

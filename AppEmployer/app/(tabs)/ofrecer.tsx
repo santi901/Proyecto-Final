@@ -19,6 +19,8 @@ import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
+import BotonChat from '../../components/boton-chat';
+import { activarNotificacionesPush } from '../../lib/notificaciones';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -92,6 +94,8 @@ export default function OfrecerTrabajoScreen() {
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleador');
       setUsuarioId(u.id);
+      // Con sesión activa (recién logueado o al abrir la app) se registra el token de push.
+      activarNotificacionesPush();
       const estado = await iniciarUbicacion(u.id);
       if (activo && estado === 'ok') {
         detenerSeguimiento = seguirUbicacion(u.id, setCoords);
@@ -257,9 +261,7 @@ export default function OfrecerTrabajoScreen() {
           <MaterialIcons name="home" size={24} color={Paleta.principal} />
         </View>
         <View className="flex-row gap-3">
-          <View className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro">
-            <MaterialIcons name="chat-bubble-outline" size={22} color={Paleta.principal} />
-          </View>
+          <BotonChat />
           <Pressable
             onPress={abrirPerfil}
             className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">

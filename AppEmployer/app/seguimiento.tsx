@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   Text,
@@ -11,18 +12,80 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapaSeguimiento from '../components/mapa-seguimiento';
+import CalificacionEstrellas from '../components/calificacion-estrellas';
 import {
   obtenerTrabajo,
   completarTrabajo,
   obtenerPinLocal,
+  calificarTrabajo,
+  marcarCalificadoLocal,
+  yaCalificadoLocal,
+  formatearDuracion,
   type Trabajo,
 } from '../lib/trabajos';
+import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
 import { Paleta } from '@/constants/theme';
 
-// Seguimiento del trabajo publicado, del lado del empleador:
+function fechaCorta(iso: string) {
+  const d = new Date(iso);
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return `${dos(d.getDate())}/${dos(d.getMonth() + 1)} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
+}
+
+// Última foto de evidencia que subió el trabajador, o el aviso de que todavía no hay.
+function FotoEvidencia({ evidencias }: { evidencias: Evidencia[] | null }) {
+  const [noCargo, setNoCargo] = useState(false);
+  const ultima = evidencias?.[0] ?? null;
+  const url = ultima ? urlDeEvidencia(ultima) : null;
+
+  if (evidencias === null) {
+    return (
+      <View className="h-32 items-center justify-center">
+        <ActivityIndicator color={Paleta.principal} />
+      </View>
+    );
+  }
+
+  if (!ultima) {
+    return (
+      <View className="h-32 items-center justify-center px-6">
+        <MaterialIcons name="hourglass-empty" size={28} color={Paleta.neutro} />
+        <Text className="text-neutro text-sm font-nunito mt-2 text-center">
+          Todavía no hay foto del trabajador
+        </Text>
+      </View>
+    );
+  }
+
+  if (url && !noCargo) {
+    return (
+      <Image
+        source={{ uri: url }}
+        style={{ width: '100%', height: 220 }}
+        resizeMode="cover"
+        onError={() => setNoCargo(true)}
+      />
+    );
+  }
+
+  return (
+    <View className="h-32 items-center justify-center px-6">
+      <MaterialIcons name="photo" size={28} color={Paleta.principal} />
+      <Text className="text-principal text-sm font-nunito-semi mt-2 text-center">
+        El trabajador subió la foto ({fechaCorta(ultima.creado_en)})
+      </Text>
+      <Text className="text-neutro text-xs font-nunito mt-1 text-center">
+        No se pudo mostrar la imagen en la app.
+      </Text>
+    </View>
+  );
+}
+
+// Seguimiento / detalle del trabajo publicado, del lado del empleador:
 //   · mapa con el lugar del trabajo
 //   · el PIN de verificación que hay que dictarle al trabajador cuando llega
-//   · la foto de evidencia y la confirmación de finalización
+//   · chat con el trabajador, la foto de evidencia y la confirmación de finalización
+//   · una vez completado: la foto y la calificación del trabajador
 //
 // Nota sobre el PIN: el backend de Nico lo devuelve **una sola vez**, al publicar el
 // trabajo (`POST /api/trabajos`), y quien lo valida contra la base es el trabajador
@@ -49,14 +112,36 @@ export default function SeguimientoScreen() {
   const [confirmando, setConfirmando] = useState(false);
   const [confirmandoFin, setConfirmandoFin] = useState(false);
 
-  // ----- PIN guardado en este dispositivo al publicar -----
+  const [evidencias, setEvidencias] = useState<Evidencia[] | null>(null);
+
+  const [puntaje, setPuntaje] = useState(0);
+  const [comentario, setComentario] = useState('');
+  const [calificando, setCalificando] = useState(false);
+  const [calificado, setCalificado] = useState(false);
+  const [errorCalificacion, setErrorCalificacion] = useState('');
+
+  // ----- Datos guardados en este dispositivo: el PIN y si ya se calificó -----
   useEffect(() => {
-    if (trabajoId) obtenerPinLocal(trabajoId).then(setPinDelTrabajo);
+    if (!trabajoId) return;
+    obtenerPinLocal(trabajoId).then(setPinDelTrabajo);
+    yaCalificadoLocal(trabajoId).then(setCalificado);
   }, [trabajoId]);
 
-  // ----- Estado del trabajo -----
+  // Si el backend de fotos no responde, se muestra como "todavía no hay foto" sin romper la pantalla.
+  async function cargarEvidencia() {
+    try {
+      setEvidencias(await listarEvidencia(trabajoId!));
+    } catch (e: any) {
+      console.log('No se pudo cargar la evidencia:', e?.message);
+      setEvidencias(prev => prev ?? []);
+    }
+  }
+
+  // ----- Estado del trabajo (y la foto, cuando corresponde) -----
   // Se refresca cada 5 segundos mientras el trabajo no esté completado.
   const completadoRef = useRef(false);
+  // Hora de la última consulta: para saber si la solicitud venció sin leer el reloj en el render.
+  const [ahora, setAhora] = useState(0);
 
   useEffect(() => {
     if (!trabajoId) { setError('No se recibió el trabajo.'); setCargando(false); return; }
@@ -68,8 +153,10 @@ export default function SeguimientoScreen() {
         const { trabajo: t } = await obtenerTrabajo(trabajoId!);
         if (!activo) return;
         setTrabajo(t);
+        setAhora(Date.now());
         completadoRef.current = t.estado === 'completado';
         setError('');
+        if (t.estado === 'en_progreso' || t.estado === 'completado') cargarEvidencia();
       } catch (e: any) {
         if (activo) setError(e?.message ?? 'No pudimos cargar el trabajo.');
       } finally {
@@ -91,6 +178,15 @@ export default function SeguimientoScreen() {
     [trabajo?.latitud, trabajo?.longitud],
   );
 
+  function volver() {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/ofrecer' as any);
+  }
+
+  function abrirChat() {
+    router.push({ pathname: '/chat', params: { trabajoId } } as any);
+  }
+
   function verificarPin() {
     setErrorPin('');
     if (pinIngresado.length !== 6) { setErrorPin('El PIN tiene 6 dígitos.'); return; }
@@ -102,14 +198,31 @@ export default function SeguimientoScreen() {
     setError('');
     setConfirmando(true);
     try {
-      await completarTrabajo(trabajoId!);
-      setTrabajo(t => (t ? { ...t, estado: 'completado' } : t));
+      const { duracionSegundos } = await completarTrabajo(trabajoId!);
+      setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos } : t));
       completadoRef.current = true;
       setConfirmandoFin(false);
+      cargarEvidencia();
     } catch (e: any) {
       setError(e?.message ?? 'No pudimos confirmar la finalización.');
     } finally {
       setConfirmando(false);
+    }
+  }
+
+  async function handleCalificar() {
+    setErrorCalificacion('');
+    if (puntaje < 1) { setErrorCalificacion('Elegí de 1 a 5 estrellas.'); return; }
+
+    setCalificando(true);
+    try {
+      await calificarTrabajo(trabajoId!, puntaje, comentario.trim() || undefined);
+      await marcarCalificadoLocal(trabajoId!);
+      setCalificado(true);
+    } catch (e: any) {
+      setErrorCalificacion(e?.message ?? 'No pudimos enviar la calificación.');
+    } finally {
+      setCalificando(false);
     }
   }
 
@@ -133,7 +246,7 @@ export default function SeguimientoScreen() {
         </Text>
         <Text className="text-neutro text-sm font-nunito text-center mb-7">{error}</Text>
         <Pressable
-          onPress={() => router.replace('/(tabs)/ofrecer' as any)}
+          onPress={volver}
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
           <Text className="text-white text-base font-nunito-bold">Volver</Text>
         </Pressable>
@@ -141,27 +254,104 @@ export default function SeguimientoScreen() {
     );
   }
 
-  // ----- Trabajo confirmado por las dos partes -----
+  // ----- Trabajo completado: foto de evidencia + calificación -----
   if (trabajo.estado === 'completado') {
     return (
-      <View
-        className="flex-1 bg-fondo items-center justify-center px-8"
-        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
-        <View className="w-24 h-24 rounded-full bg-exito items-center justify-center mb-6">
-          <MaterialIcons name="check" size={56} color="#ffffff" />
+      <ScrollView
+        className="flex-1 bg-fondo"
+        contentContainerStyle={{
+          paddingHorizontal: 24,
+          paddingTop: insets.top + 28,
+          paddingBottom: insets.bottom + 32,
+        }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        <View className="items-center mb-6">
+          <View className="w-20 h-20 rounded-full bg-exito items-center justify-center mb-4">
+            <MaterialIcons name="check" size={48} color="#ffffff" />
+          </View>
+          <Text className="text-principal text-2xl font-nunito-bold text-center mb-1">
+            ¡Trabajo finalizado!
+          </Text>
+          <Text className="text-neutro text-sm font-nunito text-center leading-5">
+            {trabajo.titulo} · se liberó el pago de ${trabajo.precio} al trabajador.
+          </Text>
+          {trabajo.duracionSegundos ? (
+            <Text className="text-neutro text-sm font-nunito text-center mt-1">
+              Duración: {formatearDuracion(trabajo.duracionSegundos)}
+            </Text>
+          ) : null}
         </View>
-        <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">
-          ¡Trabajo finalizado!
-        </Text>
-        <Text className="text-neutro text-sm font-nunito text-center leading-5 mb-8">
-          Confirmaron los dos. Se liberó el pago de ${trabajo.precio} al trabajador.
-        </Text>
+
+        {/* Evidencia */}
+        <Text className="text-principal text-base font-nunito-bold mb-2">Foto del trabajo terminado</Text>
+        <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-6">
+          <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+        </View>
+
+        {/* Calificación del trabajador */}
+        <View className="bg-white border border-neutro rounded-xl p-4 mb-6">
+          {calificado ? (
+            <View className="items-center py-2">
+              <MaterialIcons name="star" size={32} color={Paleta.acento} />
+              <Text className="text-principal text-base font-nunito-bold mt-1">¡Gracias por calificar!</Text>
+              <Text className="text-neutro text-xs font-nunito text-center mt-1">
+                Tu calificación suma a la reputación del trabajador.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <Text className="text-principal text-base font-nunito-bold text-center mb-1">¿Cómo trabajó?</Text>
+              <Text className="text-neutro text-xs font-nunito text-center mb-3">
+                Calificá al trabajador de 1 a 5 estrellas.
+              </Text>
+
+              <CalificacionEstrellas
+                valor={puntaje}
+                onCambiar={v => { setPuntaje(v); setErrorCalificacion(''); }}
+              />
+
+              <TextInput
+                className="bg-fondo-suave rounded-[10px] px-4 py-3 mt-4 mb-3 text-[15px] font-nunito text-principal border border-neutro h-20"
+                style={{ textAlignVertical: 'top' }}
+                placeholder="Comentario (opcional)"
+                placeholderTextColor={Paleta.neutro}
+                value={comentario}
+                onChangeText={setComentario}
+                multiline
+                maxLength={300}
+              />
+
+              {errorCalificacion ? (
+                <Text className="text-error text-[13px] font-nunito text-center mb-2">{errorCalificacion}</Text>
+              ) : null}
+
+              <Pressable
+                onPress={handleCalificar}
+                disabled={calificando}
+                className="bg-principal rounded-xl py-3.5 items-center active:opacity-90">
+                {calificando ? (
+                  <ActivityIndicator color={Paleta.blanco} />
+                ) : (
+                  <Text className="text-white text-base font-nunito-bold">Enviar calificación</Text>
+                )}
+              </Pressable>
+            </>
+          )}
+        </View>
+
+        <Pressable
+          onPress={abrirChat}
+          className="bg-white rounded-xl py-3.5 items-center border-[1.5px] border-principal active:opacity-70 mb-3">
+          <Text className="text-principal text-base font-nunito-bold">Ver el chat</Text>
+        </Pressable>
+
         <Pressable
           onPress={() => router.replace('/(tabs)/ofrecer' as any)}
-          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
+          className="bg-principal rounded-xl py-4 items-center active:opacity-90">
           <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -169,7 +359,7 @@ export default function SeguimientoScreen() {
   const solicitudVencida =
     trabajo.estado === 'pendiente' &&
     !!trabajo.solicitud_expira_en &&
-    new Date(trabajo.solicitud_expira_en).getTime() < Date.now();
+    new Date(trabajo.solicitud_expira_en).getTime() < ahora;
 
   return (
     <View className="flex-1 bg-fondo" style={{ paddingTop: insets.top }}>
@@ -178,7 +368,7 @@ export default function SeguimientoScreen() {
         {lugar ? <MapaSeguimiento empleador={lugar} trabajador={null} /> : null}
 
         <Pressable
-          onPress={() => router.replace('/(tabs)/ofrecer' as any)}
+          onPress={volver}
           className="absolute top-3 left-4 w-10 h-10 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">
           <MaterialIcons name="arrow-back" size={22} color={Paleta.principal} />
         </Pressable>
@@ -190,7 +380,11 @@ export default function SeguimientoScreen() {
         showsVerticalScrollIndicator={false}>
         {/* Estado */}
         <View className="flex-row items-center gap-2 mb-4">
-          <View className={`w-2.5 h-2.5 rounded-full ${solicitudVencida ? 'bg-error' : trabajo.estado === 'pendiente' ? 'bg-neutro' : 'bg-exito'}`} />
+          <View
+            className={`w-2.5 h-2.5 rounded-full ${
+              solicitudVencida ? 'bg-error' : trabajo.estado === 'pendiente' ? 'bg-neutro' : 'bg-exito'
+            }`}
+          />
           <Text className="text-neutro text-xs font-nunito-semi uppercase tracking-wider">
             {solicitudVencida
               ? 'Ningún trabajador lo tomó a tiempo'
@@ -212,6 +406,16 @@ export default function SeguimientoScreen() {
               La solicitud expiró sin que nadie la acepte. Podés publicar el trabajo de nuevo.
             </Text>
           </View>
+        ) : null}
+
+        {/* Chat con el trabajador (una vez que alguien lo aceptó) */}
+        {trabajo.estado === 'asignado' || enProgreso ? (
+          <Pressable
+            onPress={abrirChat}
+            className="flex-row items-center justify-center bg-white border-[1.5px] border-principal rounded-xl py-3 mb-5 active:opacity-70">
+            <MaterialIcons name="chat-bubble-outline" size={18} color={Paleta.principal} />
+            <Text className="text-principal text-sm font-nunito-bold ml-2">Chat con el trabajador</Text>
+          </Pressable>
         ) : null}
 
         {/* PIN de verificación */}
@@ -276,12 +480,7 @@ export default function SeguimientoScreen() {
             </Text>
 
             <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-5">
-              <View className="h-32 items-center justify-center">
-                <MaterialIcons name="hourglass-empty" size={28} color={Paleta.neutro} />
-                <Text className="text-neutro text-sm font-nunito mt-2">
-                  Esperando la foto del trabajador
-                </Text>
-              </View>
+              <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
             </View>
 
             {error ? (

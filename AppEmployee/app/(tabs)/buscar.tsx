@@ -26,6 +26,8 @@ import {
 import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 import ModalSolicitud from '../../components/modal-solicitud';
+import BotonChat from '../../components/boton-chat';
+import { activarNotificacionesPush } from '../../lib/notificaciones';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -88,6 +90,8 @@ export default function BuscarTrabajoScreen() {
       setUsuarioId(u.id);
       // Bloquear acceso si la identidad todavía no está verificada
       if (u.verificado === false) { setAccesoBloqueado(true); return; }
+      // Con sesión activa (recién logueado o al abrir la app) se registra el token de push.
+      activarNotificacionesPush();
       const estado = await iniciarUbicacion(u.id);
       if (activo && estado === 'ok') {
         detenerSeguimiento = seguirUbicacion(u.id, setCoords);
@@ -301,9 +305,7 @@ export default function BuscarTrabajoScreen() {
           <MaterialIcons name="place" size={24} color={Paleta.principal} />
         </View>
         <View className="flex-row gap-3">
-          <View className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro">
-            <MaterialIcons name="chat-bubble-outline" size={22} color={Paleta.principal} />
-          </View>
+          <BotonChat />
           <Pressable
             onPress={abrirPerfil}
             className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">

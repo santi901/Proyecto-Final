@@ -13,16 +13,21 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { getUsuario } from '../auth';
-import { supabase } from '../supabaseClient';
 import { seguirUbicacion, distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
-import { obtenerTrabajo, validarPin, completarTrabajo, type Trabajo } from '../lib/trabajos';
+import {
+  obtenerTrabajo,
+  validarPin,
+  completarTrabajo,
+  formatearDuracion,
+  type Trabajo,
+} from '../lib/trabajos';
+import { subirEvidencia } from '../lib/evidencia';
 import { Paleta } from '@/constants/theme';
 
 // Pantalla de trabajo en curso. Cubre los tres momentos del trabajo aceptado:
 //   1. `asignado`    → mostrar dónde es y pedir el PIN que dicta el empleador
-//   2. `en_progreso` → subir la foto de evidencia y marcar como finalizado
+//   2. `en_progreso` → sacar/subir la foto de evidencia y marcar como finalizado
 //   3. `completado`  → confirmación
 //
 // Mientras la pantalla está viva, la ubicación del trabajador se manda al backend
@@ -34,6 +39,7 @@ export default function TrabajoEnCursoScreen() {
 
   const [trabajo, setTrabajo] = useState<Trabajo | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState('');
   const [error, setError] = useState('');
 
   const [pin, setPin] = useState('');
@@ -41,36 +47,49 @@ export default function TrabajoEnCursoScreen() {
   const [errorPin, setErrorPin] = useState('');
 
   const [foto, setFoto] = useState<string | null>(null);
+  const [fotoSubida, setFotoSubida] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
-  const [fotoUrl, setFotoUrl] = useState<string | null>(null);
 
   const [confirmandoFin, setConfirmandoFin] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
-  const [finalizado, setFinalizado] = useState(false);
 
   const [ultimaPos, setUltimaPos] = useState<Coordenadas | null>(null);
 
-  // ----- Traer el trabajo -----
-  useEffect(() => {
-    let activo = true;
-    if (!trabajoId) { setError('No se recibió el trabajo.'); setCargando(false); return; }
+  const finalizado = trabajo?.estado === 'completado';
 
-    obtenerTrabajo(trabajoId)
-      .then(({ trabajo: t }) => {
+  // ----- Traer el trabajo -----
+  // Se vuelve a consultar cada 10 segundos: el empleador también puede darlo por terminado.
+  const completadoRef = useRef(false);
+
+  useEffect(() => {
+    if (!trabajoId) { setErrorCarga('No se recibió el trabajo.'); setCargando(false); return; }
+
+    let activo = true;
+
+    async function refrescar() {
+      try {
+        const { trabajo: t } = await obtenerTrabajo(trabajoId!);
         if (!activo) return;
         setTrabajo(t);
-        if (t.estado === 'completado') setFinalizado(true);
-      })
-      .catch(e => activo && setError(e?.message ?? 'No pudimos cargar el trabajo.'))
-      .finally(() => activo && setCargando(false));
+        completadoRef.current = t.estado === 'completado';
+        setErrorCarga('');
+      } catch (e: any) {
+        if (activo) setErrorCarga(e?.message ?? 'No pudimos cargar el trabajo.');
+      } finally {
+        if (activo) setCargando(false);
+      }
+    }
 
-    return () => { activo = false; };
+    refrescar();
+    const reloj = setInterval(() => {
+      if (!completadoRef.current) refrescar();
+    }, 10000);
+
+    return () => { activo = false; clearInterval(reloj); };
   }, [trabajoId]);
 
   // ----- Ubicación en tiempo real -----
   // Arranca apenas se acepta el trabajo y se corta al finalizar o al salir de la pantalla.
-  const usuarioIdRef = useRef('');
-
   useEffect(() => {
     if (!trabajoId || finalizado) return;
 
@@ -79,7 +98,6 @@ export default function TrabajoEnCursoScreen() {
 
     getUsuario().then(u => {
       if (!u || !activo) return;
-      usuarioIdRef.current = u.id;
       // Si falla el envío (red, backend caído) se loguea y no rompe la pantalla.
       cortar = seguirUbicacion(u.id, setUltimaPos, trabajoId);
     });
@@ -104,33 +122,25 @@ export default function TrabajoEnCursoScreen() {
   }
 
   // ----- Foto de evidencia -----
-  async function elegirFoto() {
-    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    // Si no hay cámara disponible (emulador), se cae a la galería.
-    const resultado = r.canceled
-      ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 })
-      : r;
-
-    if (resultado.canceled) return;
-    setFoto(resultado.assets[0].uri);
-    setFotoUrl(null);
+  function usarFoto(uri: string) {
+    setError('');
+    setFoto(uri);
+    setFotoSubida(false);
   }
 
-  async function subirEvidencia(uri: string) {
-    const ext = uri.split('.').pop() ?? 'jpg';
-    const nombre = `trabajo-${trabajoId}.${ext}`;
+  async function sacarFoto() {
+    const permiso = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permiso.granted) {
+      setError('Necesitamos permiso para usar la cámara. También podés elegir la foto de la galería.');
+      return;
+    }
+    const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.6 });
+    if (!r.canceled) usarFoto(r.assets[0].uri);
+  }
 
-    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
-
-    const { error: errorSubida } = await supabase.storage
-      .from('evidencias')
-      .upload(nombre, blob, { upsert: true, contentType: `image/${ext}` });
-
-    if (errorSubida) throw errorSubida;
-
-    const { data } = supabase.storage.from('evidencias').getPublicUrl(nombre);
-    return data.publicUrl;
+  async function elegirDeGaleria() {
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 });
+    if (!r.canceled) usarFoto(r.assets[0].uri);
   }
 
   // ----- Finalizar -----
@@ -140,16 +150,19 @@ export default function TrabajoEnCursoScreen() {
 
     setFinalizando(true);
     try {
-      // La foto se sube recién acá para no dejar evidencia de trabajos que no se cerraron.
-      if (!fotoUrl) {
+      // La foto se sube recién acá, para no dejar evidencia de trabajos que no se cerraron.
+      // Si ya se subió en un intento anterior (y lo que falló fue completar), no se repite.
+      if (!fotoSubida) {
         setSubiendoFoto(true);
-        const url = await subirEvidencia(foto);
-        setFotoUrl(url);
+        const u = await getUsuario();
+        await subirEvidencia(trabajoId!, u?.id ?? '', foto);
+        setFotoSubida(true);
         setSubiendoFoto(false);
       }
 
-      await completarTrabajo(trabajoId!);
-      setFinalizado(true);
+      const { duracionSegundos } = await completarTrabajo(trabajoId!);
+      setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos } : t));
+      completadoRef.current = true;
       setConfirmandoFin(false);
     } catch (e: any) {
       setSubiendoFoto(false);
@@ -157,6 +170,10 @@ export default function TrabajoEnCursoScreen() {
     } finally {
       setFinalizando(false);
     }
+  }
+
+  function abrirChat() {
+    router.push({ pathname: '/chat', params: { trabajoId } } as any);
   }
 
   // ----- Estados de carga / error -----
@@ -178,7 +195,7 @@ export default function TrabajoEnCursoScreen() {
         <Text className="text-principal text-lg font-nunito-bold text-center mt-4 mb-2">
           No pudimos abrir el trabajo
         </Text>
-        <Text className="text-neutro text-sm font-nunito text-center mb-7">{error}</Text>
+        <Text className="text-neutro text-sm font-nunito text-center mb-7">{errorCarga}</Text>
         <Pressable
           onPress={() => router.replace('/buscar' as any)}
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
@@ -200,13 +217,17 @@ export default function TrabajoEnCursoScreen() {
         <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">
           ¡Trabajo finalizado!
         </Text>
-        <Text className="text-neutro text-sm font-nunito text-center leading-5 mb-8">
-          Le avisamos al empleador para que lo confirme de su lado. En cuanto lo confirme
-          se libera el pago de ${trabajo.precio}.
+        <Text className="text-neutro text-sm font-nunito text-center leading-5">
+          El trabajo quedó completado y le avisamos al empleador. Se libera el pago de ${trabajo.precio}.
         </Text>
+        {trabajo.duracionSegundos ? (
+          <Text className="text-neutro text-sm font-nunito text-center mt-1">
+            Duración: {formatearDuracion(trabajo.duracionSegundos)}
+          </Text>
+        ) : null}
         <Pressable
           onPress={() => router.replace('/buscar' as any)}
-          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
+          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mt-8">
           <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
         </Pressable>
       </View>
@@ -261,7 +282,7 @@ export default function TrabajoEnCursoScreen() {
       </View>
 
       {/* Aviso de ubicación compartida */}
-      <View className="flex-row items-center bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mb-5">
+      <View className="flex-row items-center bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mb-3">
         <MaterialIcons name="my-location" size={18} color={Paleta.principal} />
         <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
           {ultimaPos
@@ -269,6 +290,14 @@ export default function TrabajoEnCursoScreen() {
             : 'Activando el envío de tu ubicación…'}
         </Text>
       </View>
+
+      {/* Chat con el empleador */}
+      <Pressable
+        onPress={abrirChat}
+        className="flex-row items-center justify-center bg-white border-[1.5px] border-principal rounded-xl py-3 mb-6 active:opacity-70">
+        <MaterialIcons name="chat-bubble-outline" size={18} color={Paleta.principal} />
+        <Text className="text-principal text-sm font-nunito-bold ml-2">Chat con el empleador</Text>
+      </Pressable>
 
       {esperandoPin ? (
         <>
@@ -307,21 +336,38 @@ export default function TrabajoEnCursoScreen() {
           {/* Foto de evidencia */}
           <Text className="text-principal text-base font-nunito-bold mb-1">Foto del trabajo terminado</Text>
           <Text className="text-neutro text-sm font-nunito mb-3 leading-5">
-            Sacá una foto como evidencia de que terminaste. El empleador la ve antes de confirmar.
+            Sacá una foto como evidencia de que terminaste. El empleador la ve en el detalle del trabajo.
           </Text>
 
-          <Pressable
-            onPress={elegirFoto}
-            className="bg-white border border-neutro rounded-xl overflow-hidden mb-5 active:opacity-70">
+          <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-3">
             {foto ? (
               <Image source={{ uri: foto }} style={{ width: '100%', height: 200 }} resizeMode="cover" />
             ) : (
               <View className="h-40 items-center justify-center">
                 <MaterialIcons name="add-a-photo" size={34} color={Paleta.neutro} />
-                <Text className="text-neutro text-sm font-nunito mt-2">Tocá para sacar la foto</Text>
+                <Text className="text-neutro text-sm font-nunito mt-2">Todavía no elegiste la foto</Text>
               </View>
             )}
-          </Pressable>
+          </View>
+
+          <View className="flex-row gap-3 mb-5">
+            <Pressable
+              onPress={sacarFoto}
+              disabled={finalizando}
+              className="flex-1 flex-row items-center justify-center bg-white border-[1.5px] border-principal rounded-xl py-3 active:opacity-70">
+              <MaterialIcons name="photo-camera" size={18} color={Paleta.principal} />
+              <Text className="text-principal text-sm font-nunito-bold ml-1.5">
+                {foto ? 'Sacar otra' : 'Sacar foto'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={elegirDeGaleria}
+              disabled={finalizando}
+              className="flex-1 flex-row items-center justify-center bg-white border-[1.5px] border-principal rounded-xl py-3 active:opacity-70">
+              <MaterialIcons name="photo-library" size={18} color={Paleta.principal} />
+              <Text className="text-principal text-sm font-nunito-bold ml-1.5">Galería</Text>
+            </Pressable>
+          </View>
 
           {error ? (
             <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text>
@@ -331,8 +377,8 @@ export default function TrabajoEnCursoScreen() {
             <View className="bg-white border border-neutro rounded-xl p-4">
               <Text className="text-principal text-base font-nunito-bold mb-1">¿Terminaste el trabajo?</Text>
               <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
-                Se le manda la foto al empleador y queda pendiente de su confirmación. Una vez
-                que confirma, se libera el pago de ${trabajo.precio}.
+                Se sube la foto como evidencia y el trabajo queda completado. Se libera el pago
+                de ${trabajo.precio}.
               </Text>
 
               <Pressable
