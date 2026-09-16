@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase')
 const { calcularDistanciaKm } = require('../utils/haversine')
+const { guardarUbicacionEfimera, obtenerUbicacionEfimera } = require('../services/ubicacionCacheService')
 
 const PRECIO_NAFTA_ARS = 2070
 const RENDIMIENTO_KM_POR_LITRO = 13
@@ -70,6 +71,9 @@ async function actualizarUbicacion(req, res) {
     console.error(`Error guardando ubicación en Supabase (workerId=${workerId}): ${error.message ?? error}`)
     return res.status(500).json({ error: 'Error al guardar la ubicación.' })
   }
+
+  // Best-effort: si Redis no está disponible esto no frena la respuesta.
+  guardarUbicacionEfimera(workerId, lat, lng)
 
   if (!jobId) return res.json({ mensaje: 'Ubicación actualizada' })
 
@@ -150,4 +154,15 @@ async function obtenerUbicacionTrabajador(req, res) {
   res.json({ lat: ubicacion.lat, lng: ubicacion.lng, actualizadoEn: ubicacion.updated_at })
 }
 
-module.exports = { calcularViaje, actualizarUbicacion, obtenerUbicacionTrabajador }
+// Fallback por si el cliente no está conectado por WebSocket (o se perdió el
+// evento): última ubicación conocida desde el cache efímero de Redis.
+async function obtenerUbicacionCache(req, res) {
+  const { workerId } = req.params
+
+  const ubicacion = await obtenerUbicacionEfimera(workerId)
+  if (!ubicacion) return res.status(404).json({ error: 'No hay ubicación reciente para este trabajador.' })
+
+  res.json({ ubicacion })
+}
+
+module.exports = { calcularViaje, actualizarUbicacion, obtenerUbicacionTrabajador, obtenerUbicacionCache }
