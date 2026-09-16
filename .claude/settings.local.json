@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx tsc *)",
-      "Bash(node \"../AppEmployer/node_modules/typescript/bin/tsc\" --noEmit -p tsconfig.json)"
-    ]
-  }
-}

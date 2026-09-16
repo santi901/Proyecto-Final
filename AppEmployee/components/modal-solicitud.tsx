@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Paleta } from '@/constants/theme';
-import { SEGUNDOS_LIMITE_POR_DEFECTO, type Trabajo } from '../lib/trabajo';
+import { SEGUNDOS_LIMITE_POR_DEFECTO, segundosParaResponder, type Trabajo } from '../lib/trabajos';
+import { distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
 
 type Props = {
   trabajo: Trabajo | null;
+  /** Posición actual del trabajador, para mostrar a qué distancia queda el trabajo. */
+  miUbicacion: Coordenadas | null;
   onAceptar: (trabajo: Trabajo) => void;
   onRechazar: () => void;
   /** Se llama cuando se acaba el tiempo: cuenta como rechazo automático. */
@@ -13,11 +16,10 @@ type Props = {
 };
 
 // Solicitud entrante de trabajo. Se muestra encima de la pantalla de búsqueda con el
-// título, la descripción, el pago y una cuenta regresiva. El límite lo define el backend
-// de Ignacio en `segundos_limite`; si no lo manda, son 30 segundos.
-export default function ModalSolicitud({ trabajo, onAceptar, onRechazar, onVencer }: Props) {
-  const limite = trabajo?.segundos_limite ?? SEGUNDOS_LIMITE_POR_DEFECTO;
-  const [restante, setRestante] = useState(limite);
+// título, la descripción, el pago y una cuenta regresiva de 30 segundos (menos, si la
+// solicitud del backend expira antes).
+export default function ModalSolicitud({ trabajo, miUbicacion, onAceptar, onRechazar, onVencer }: Props) {
+  const [restante, setRestante] = useState(SEGUNDOS_LIMITE_POR_DEFECTO);
   const progreso = useRef(new Animated.Value(1)).current;
 
   // Un `ref` para el callback de vencimiento: así el temporizador no se reinicia
@@ -28,6 +30,7 @@ export default function ModalSolicitud({ trabajo, onAceptar, onRechazar, onVence
   useEffect(() => {
     if (!trabajo) return;
 
+    const limite = segundosParaResponder(trabajo);
     setRestante(limite);
     progreso.setValue(1);
     Animated.timing(progreso, {
@@ -48,7 +51,7 @@ export default function ModalSolicitud({ trabajo, onAceptar, onRechazar, onVence
     }, 1000);
 
     return () => clearInterval(reloj);
-  }, [trabajo, limite, progreso]);
+  }, [trabajo, progreso]);
 
   if (!trabajo) return null;
 
@@ -56,6 +59,10 @@ export default function ModalSolicitud({ trabajo, onAceptar, onRechazar, onVence
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
+
+  const distancia = miUbicacion
+    ? distanciaKm(miUbicacion, { lat: trabajo.latitud, lng: trabajo.longitud })
+    : null;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onRechazar}>
@@ -84,10 +91,12 @@ export default function ModalSolicitud({ trabajo, onAceptar, onRechazar, onVence
 
             <Text className="text-neutro text-sm font-nunito leading-5 mb-4">{trabajo.descripcion}</Text>
 
-            {trabajo.direccion ? (
+            {distancia !== null ? (
               <View className="flex-row items-start mb-4">
                 <MaterialIcons name="place" size={18} color={Paleta.principal} />
-                <Text className="flex-1 text-principal text-sm font-nunito ml-2">{trabajo.direccion}</Text>
+                <Text className="flex-1 text-principal text-sm font-nunito ml-2">
+                  A {formatearDistancia(distancia)} de tu ubicación
+                </Text>
               </View>
             ) : null}
 

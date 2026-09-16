@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Pressable,
   ScrollView,
@@ -12,8 +13,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleador } from '../auth';
+import { registrarEmpleador, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Paleta } from '@/constants/theme';
@@ -48,15 +50,21 @@ export default function RegisterScreen() {
   });
 
   const [fotoPerfil, setFotoPerfil] = useState<string | null>(null);
+  const [fotoDni, setFotoDni] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Estado del sistema de verificación de identidad de Ignacio:
+  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint /verificacion/comparar-caras
+  const [verifEstado, setVerifEstado] = useState<'procesando' | 'aprobado' | 'rechazado' | null>(null);
+  const [verifMensaje, setVerifMensaje] = useState('');
 
   function actualizar(campo: string, valor: string) {
     setForm(prev => ({ ...prev, [campo]: valor }));
   }
 
-  async function seleccionarFoto() {
+  async function seleccionarFoto(tipo: 'perfil' | 'dni') {
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -64,25 +72,25 @@ export default function RegisterScreen() {
     });
 
     if (!resultado.canceled) {
-      setFotoPerfil(resultado.assets[0].uri);
+      if (tipo === 'perfil') setFotoPerfil(resultado.assets[0].uri);
+      else setFotoDni(resultado.assets[0].uri);
     }
   }
 
-  async function subirFoto(uri: string, _userId: string) {
+  async function subirFoto(uri: string, bucket: string) {
     const ext = uri.split('.').pop();
     const fileName = `employer/${form.dni}.${ext}`;  // ← DNI en lugar de userId
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: 'base64',
     });
-    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
 
     const { error } = await supabase.storage
-      .from('fotos-perfil')
-      .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
+      .from(bucket)
+      .upload(fileName, decodeBase64(base64), { upsert: true, contentType: `image/${ext}` });
 
     if (error) throw error;
 
-    const { data } = supabase.storage.from('fotos-perfil').getPublicUrl(fileName);
+    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
     return data.publicUrl;
   }
 
@@ -106,16 +114,19 @@ export default function RegisterScreen() {
     }
 
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
 
@@ -125,14 +136,14 @@ export default function RegisterScreen() {
   async function handleRegistro() {
     setError('');
 
-    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion || !form.piso_departamento) {
+    if (!form.nombre || !form.apellido || !form.email || !form.password || !form.password2 || !form.fecha_nacimiento || !form.dni || !form.codigo_postal || !form.direccion) {
       setError('Completá todos los campos obligatorios.');
       return;
     }
-if (!fotoPerfil) {
-  setError('La foto de perfil es obligatoria.');
-  return;
-}
+    if (!fotoPerfil || !fotoDni) {
+      setError('Subí tu foto de perfil y la foto del DNI para verificar tu identidad.');
+      return;
+    }
     if (form.password !== form.password2) {
       setError('Las contraseñas no coinciden.');
       return;
@@ -142,41 +153,83 @@ if (!fotoPerfil) {
       setError('La contraseña debe tener al menos 6 caracteres.');
       return;
     }
-    if (!fotoPerfil) {
-      setError('La foto de perfil es obligatoria.');
+
+    const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
+    if (
+      partes.length !== 3 ||
+      partes[0].length !== 2 ||
+      partes[1].length !== 2 ||
+      partes[2].length !== 4 ||
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
+    ) {
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
+    const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
 
-  const partes = form.fecha_nacimiento.split('/');
-if (
-  partes.length !== 3 ||
-  partes[0].length !== 2 ||
-  partes[1].length !== 2 ||
-  partes[2].length !== 4 ||
-  isNaN(Number(partes[0])) ||
-  isNaN(Number(partes[1])) ||
-  isNaN(Number(partes[2]))
-) {
-  setError('La fecha debe tener el formato DD/MM/AAAA.');
-  setCargando(false);
-  return;
-}
-  const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
+    setCargando(true);
 
-  setCargando(true);
-
-    // 1 — Subir foto a Supabase Storage
-    let fotoPerfilUrl = null;
-
+    // 1 — Verificar identidad con AWS ANTES de crear el usuario
+    setVerifMensaje('');
+    setVerifEstado('procesando');
     try {
-      if (fotoPerfil) fotoPerfilUrl = await subirFoto(fotoPerfil, '');
+      const formData = new FormData();
+      formData.append('dni', {
+        uri: fotoDni!,
+        name: `dni-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
+      formData.append('selfie', {
+        uri: fotoPerfil!,
+        name: `selfie-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
+      formData.append('userId', form.dni);
+
+      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const resultado = await verificacion.json();
+
+      if (!verificacion.ok || resultado.estado !== 'aprobado') {
+        const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
+        setVerifMensaje(
+          resultado.mensaje || resultado.error || resultado.message ||
+            `Las fotos no coinciden${sim}. Asegurate de que la selfie y la foto del DNI sean de la misma persona.`,
+        );
+        setVerifEstado('rechazado');
+        setCargando(false);
+        return;
+      }
     } catch (e: any) {
-      setError('Error al subir la foto: ' + e.message);
+      console.error('Error en verificación (detalle técnico):', e);
+      setVerifMensaje(`No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.\n\n[debug: ${e?.name || 'Error'}: ${e?.message || String(e)}]`);
+      setVerifEstado('rechazado');
       setCargando(false);
       return;
     }
 
-    // 2 — Registrar en el backend (crea usuario + perfil en perfiles)
+    // 2 — Subir fotos a Supabase Storage
+    let fotoPerfilUrl = null;
+
+    try {
+      fotoPerfilUrl = await subirFoto(fotoPerfil, 'fotos-perfil');
+      await subirFoto(fotoDni, 'fotos-dni');
+    } catch (e: any) {
+      setVerifEstado(null);
+      setError('Error al subir las fotos: ' + e.message);
+      setCargando(false);
+      return;
+    }
+
+    // 3 — Registrar en el backend (crea usuario + perfil en perfiles)
     try {
       await registrarEmpleador({
         email:             form.email,
@@ -194,16 +247,17 @@ if (
         lng:               coordenadas?.lng ?? null,
       });
     } catch (e: any) {
-      if (fotoPerfil) {
-        await supabase.storage.from('fotos-perfil').remove([`employer/${form.dni}`]);
-      }
+      await supabase.storage.from('fotos-perfil').remove([`employer/${form.dni}`]);
+      await supabase.storage.from('fotos-dni').remove([`employer/${form.dni}`]);
+      setVerifEstado(null);
       setError(e.message || 'Error al crear la cuenta');
       setCargando(false);
       return;
     }
 
     setCargando(false);
-    router.replace('/(tabs)/ofrecer' as any);
+    setVerifEstado('aprobado');
+    setTimeout(() => router.replace('/(tabs)/ofrecer' as any), 1300);
   }
   function formatearFecha(valor: string) {
     const soloNumeros = valor.replace(/\D/g, '');
@@ -230,6 +284,55 @@ if (
       }
     } catch { }
   }
+
+  // ----- Pantallas de feedback de verificación de identidad (sistema de estados de Ignacio) -----
+  if (verifEstado) {
+    return (
+      <View
+        className="flex-1 bg-fondo items-center justify-center px-8"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        {verifEstado === 'procesando' && (
+          <>
+            <ActivityIndicator size="large" color={Paleta.principal} />
+            <Text className="text-principal text-xl font-nunito-bold text-center mt-6 mb-2">
+              Verificando tu identidad…
+            </Text>
+            <Text className="text-neutro text-sm text-center leading-5 font-nunito">
+              Estamos comparando la foto de tu DNI con tu selfie. Esto puede tardar unos segundos.
+            </Text>
+          </>
+        )}
+
+        {verifEstado === 'aprobado' && (
+          <>
+            <View className="w-24 h-24 rounded-full bg-exito items-center justify-center mb-6">
+              <MaterialIcons name="check" size={56} color="#ffffff" />
+            </View>
+            <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">¡Identidad verificada!</Text>
+            <Text className="text-neutro text-sm text-center leading-5 font-nunito">
+              Listo, confirmamos que sos vos. Te estamos llevando a la app…
+            </Text>
+          </>
+        )}
+
+        {verifEstado === 'rechazado' && (
+          <>
+            <View className="w-24 h-24 rounded-full bg-error items-center justify-center mb-6">
+              <MaterialIcons name="close" size={56} color="#ffffff" />
+            </View>
+            <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">No pudimos verificarte</Text>
+            <Text className="text-neutro text-sm text-center leading-5 mb-8 font-nunito">{verifMensaje}</Text>
+            <Pressable
+              onPress={() => { setVerifEstado(null); setError(''); }}
+              className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
+              <Text className="text-white text-base font-nunito-bold">Reintentar</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       className="flex-1 bg-fondo"
@@ -395,13 +498,45 @@ if (
             multiline numberOfLines={3} />
 
           <Pressable
-            className="bg-white rounded-[10px] py-3.5 items-center mb-2 border-[1.5px] border-principal active:opacity-70"
-            onPress={seleccionarFoto}>
-            <Text className="text-principal text-[15px] font-nunito-semi">
-              {fotoPerfil ? '✓ Foto de perfil seleccionada' : 'Foto de perfil (Opcional)'}
+            onPress={() => seleccionarFoto('perfil')}
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            <View className="w-14 h-14 rounded-full bg-fondo-suave items-center justify-center overflow-hidden">
+              {fotoPerfil ? (
+                <Image source={{ uri: fotoPerfil }} className="w-14 h-14" />
+              ) : (
+                <MaterialIcons name="person" size={30} color={Paleta.neutro} />
+              )}
+            </View>
+            <Text className="flex-1 text-neutro text-sm ml-3 font-nunito">
+              {fotoPerfil
+                ? '✓ Foto de perfil cargada'
+                : 'Subí tu foto de perfil para que podamos reconocerte mejor'}
             </Text>
           </Pressable>
-          {fotoPerfil && <Image source={{ uri: fotoPerfil }} className="w-full h-44 rounded-[10px] mb-4" />}
+
+          <Pressable
+            onPress={() => seleccionarFoto('dni')}
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            <View className="w-14 h-14 rounded-lg bg-fondo-suave items-center justify-center overflow-hidden">
+              {fotoDni ? (
+                <Image source={{ uri: fotoDni }} className="w-14 h-14" />
+              ) : (
+                <MaterialIcons name="badge" size={30} color={Paleta.neutro} />
+              )}
+            </View>
+            <Text className="flex-1 text-neutro text-sm ml-3 font-nunito">
+              {fotoDni
+                ? '✓ Foto del DNI cargada'
+                : 'Agregá una foto de tu DNI para verificar tu identidad'}
+            </Text>
+          </Pressable>
+
+          <View className="flex-row items-start bg-fondo-suave rounded-lg p-3 mb-5">
+            <MaterialIcons name="verified-user" size={18} color={Paleta.principal} />
+            <Text className="flex-1 text-neutro text-xs ml-2 leading-4 font-nunito">
+              Comparamos la foto de tu DNI con tu foto de perfil para confirmar que sos vos.
+            </Text>
+          </View>
 
           {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 

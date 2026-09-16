@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   Text,
@@ -12,37 +11,37 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapaSeguimiento from '../components/mapa-seguimiento';
-import { pedirUbicacion, type Coordenadas } from '../lib/ubicacion';
 import {
   obtenerTrabajo,
   completarTrabajo,
-  ubicacionDelTrabajador,
+  obtenerPinLocal,
   type Trabajo,
-} from '../lib/trabajo';
+} from '../lib/trabajos';
 import { Paleta } from '@/constants/theme';
 
 // Seguimiento del trabajo publicado, del lado del empleador:
-//   · mapa con el pin del trabajador moviéndose hacia el lugar del trabajo
-//   · el PIN de verificación que hay que dictarle cuando llega
+//   · mapa con el lugar del trabajo
+//   · el PIN de verificación que hay que dictarle al trabajador cuando llega
 //   · la foto de evidencia y la confirmación de finalización
 //
 // Nota sobre el PIN: el backend de Nico lo devuelve **una sola vez**, al publicar el
 // trabajo (`POST /api/trabajos`), y quien lo valida contra la base es el trabajador
-// (`POST /api/trabajos/:id/validar-pin`, que es `soloEmpleado`). Por eso acá el PIN se
-// muestra para dictarlo, y el campo de abajo sirve para chequear contra el que llegó
-// por parámetro lo que el trabajador repite — no vuelve a pegarle al backend.
+// (`POST /api/trabajos/:id/validar-pin`, que es `soloEmpleado`). Por eso al publicar se
+// guarda en el dispositivo (`guardarPinLocal`) y acá se lee de ahí para dictarlo; el campo
+// de abajo sirve para chequear lo que el trabajador repite — no vuelve a pegarle al backend.
+//
+// El pin del trabajador en el mapa queda sin datos: el backend guarda la ubicación que
+// manda la app del trabajador, pero todavía no expone un endpoint para leerla.
 export default function SeguimientoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { trabajoId, pin: pinDelTrabajo } = useLocalSearchParams<{ trabajoId: string; pin: string }>();
+  const { trabajoId } = useLocalSearchParams<{ trabajoId: string }>();
 
   const [trabajo, setTrabajo] = useState<Trabajo | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
-  const [miUbicacion, setMiUbicacion] = useState<Coordenadas | null>(null);
-  const [posTrabajador, setPosTrabajador] = useState<Coordenadas | null>(null);
-
+  const [pinDelTrabajo, setPinDelTrabajo] = useState<string | null>(null);
   const [pinIngresado, setPinIngresado] = useState('');
   const [pinVerificado, setPinVerificado] = useState(false);
   const [errorPin, setErrorPin] = useState('');
@@ -50,14 +49,12 @@ export default function SeguimientoScreen() {
   const [confirmando, setConfirmando] = useState(false);
   const [confirmandoFin, setConfirmandoFin] = useState(false);
 
-  // ----- Ubicación del empleador (el lugar del trabajo) -----
+  // ----- PIN guardado en este dispositivo al publicar -----
   useEffect(() => {
-    pedirUbicacion().then(r => {
-      if (r.estado === 'ok') setMiUbicacion(r.coords);
-    });
-  }, []);
+    if (trabajoId) obtenerPinLocal(trabajoId).then(setPinDelTrabajo);
+  }, [trabajoId]);
 
-  // ----- Estado del trabajo + posición del trabajador -----
+  // ----- Estado del trabajo -----
   // Se refresca cada 5 segundos mientras el trabajo no esté completado.
   const completadoRef = useRef(false);
 
@@ -68,7 +65,7 @@ export default function SeguimientoScreen() {
 
     async function refrescar() {
       try {
-        const t = await obtenerTrabajo(trabajoId!);
+        const { trabajo: t } = await obtenerTrabajo(trabajoId!);
         if (!activo) return;
         setTrabajo(t);
         completadoRef.current = t.estado === 'completado';
@@ -78,9 +75,6 @@ export default function SeguimientoScreen() {
       } finally {
         if (activo) setCargando(false);
       }
-
-      const coords = await ubicacionDelTrabajador(trabajoId!);
-      if (activo && coords) setPosTrabajador(coords);
     }
 
     refrescar();
@@ -90,6 +84,12 @@ export default function SeguimientoScreen() {
 
     return () => { activo = false; clearInterval(reloj); };
   }, [trabajoId]);
+
+  // Objeto estable: el mapa no se vuelve a armar en cada refresco del trabajo.
+  const lugar = useMemo(
+    () => (trabajo ? { lat: trabajo.latitud, lng: trabajo.longitud } : null),
+    [trabajo?.latitud, trabajo?.longitud],
+  );
 
   function verificarPin() {
     setErrorPin('');
@@ -166,19 +166,16 @@ export default function SeguimientoScreen() {
   }
 
   const enProgreso = trabajo.estado === 'en_progreso';
+  const solicitudVencida =
+    trabajo.estado === 'pendiente' &&
+    !!trabajo.solicitud_expira_en &&
+    new Date(trabajo.solicitud_expira_en).getTime() < Date.now();
 
   return (
     <View className="flex-1 bg-fondo" style={{ paddingTop: insets.top }}>
-      {/* Mapa con el trabajador moviéndose */}
+      {/* Mapa con el lugar del trabajo */}
       <View style={{ height: 260 }}>
-        {miUbicacion ? (
-          <MapaSeguimiento empleador={miUbicacion} trabajador={posTrabajador} />
-        ) : (
-          <View className="flex-1 items-center justify-center bg-fondo-suave">
-            <ActivityIndicator color={Paleta.principal} />
-            <Text className="text-neutro text-xs font-nunito mt-2">Ubicando el lugar del trabajo…</Text>
-          </View>
-        )}
+        {lugar ? <MapaSeguimiento empleador={lugar} trabajador={null} /> : null}
 
         <Pressable
           onPress={() => router.replace('/(tabs)/ofrecer' as any)}
@@ -193,70 +190,79 @@ export default function SeguimientoScreen() {
         showsVerticalScrollIndicator={false}>
         {/* Estado */}
         <View className="flex-row items-center gap-2 mb-4">
-          <View className={`w-2.5 h-2.5 rounded-full ${posTrabajador ? 'bg-exito' : 'bg-neutro'}`} />
+          <View className={`w-2.5 h-2.5 rounded-full ${solicitudVencida ? 'bg-error' : trabajo.estado === 'pendiente' ? 'bg-neutro' : 'bg-exito'}`} />
           <Text className="text-neutro text-xs font-nunito-semi uppercase tracking-wider">
-            {trabajo.estado === 'pendiente'
+            {solicitudVencida
+              ? 'Ningún trabajador lo tomó a tiempo'
+              : trabajo.estado === 'pendiente'
               ? 'Esperando que un trabajador lo tome'
               : enProgreso
               ? 'Trabajo en curso'
-              : posTrabajador
-              ? 'El trabajador va en camino'
-              : 'Trabajador asignado'}
+              : 'El trabajador va en camino'}
           </Text>
         </View>
 
         <Text className="text-principal text-2xl font-nunito-bold mb-1">{trabajo.titulo}</Text>
         <Text className="text-neutro text-sm font-nunito mb-5">{trabajo.descripcion}</Text>
 
-        {!posTrabajador && trabajo.estado !== 'pendiente' ? (
+        {solicitudVencida ? (
           <View className="flex-row items-center bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mb-5">
-            <MaterialIcons name="location-searching" size={18} color={Paleta.neutro} />
+            <MaterialIcons name="timer-off" size={18} color={Paleta.neutro} />
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
-              Todavía no llegó la ubicación del trabajador.
+              La solicitud expiró sin que nadie la acepte. Podés publicar el trabajo de nuevo.
             </Text>
           </View>
         ) : null}
 
         {/* PIN de verificación */}
-        {!enProgreso && pinDelTrabajo ? (
+        {!enProgreso && !solicitudVencida ? (
           <View className="bg-white border border-neutro rounded-xl p-4 mb-5">
             <Text className="text-neutro text-xs font-nunito mb-1">
               Código PIN — dictáselo al trabajador cuando llegue
             </Text>
-            <Text className="text-principal text-3xl font-nunito-bold tracking-[6px] mb-4">
-              {pinDelTrabajo}
-            </Text>
 
-            {pinVerificado ? (
-              <View className="flex-row items-center">
-                <MaterialIcons name="check-circle" size={20} color={Paleta.exito} />
-                <Text className="text-principal text-sm font-nunito-semi ml-2">
-                  Código verificado. El trabajador puede arrancar.
-                </Text>
-              </View>
-            ) : (
+            {pinDelTrabajo ? (
               <>
-                <Text className="text-neutro text-xs font-nunito mb-2 leading-4">
-                  Si querés chequear que te lo repita bien, ingresalo acá.
+                <Text className="text-principal text-3xl font-nunito-bold tracking-[6px] mb-4">
+                  {pinDelTrabajo}
                 </Text>
-                <TextInput
-                  className="bg-fondo-suave rounded-[10px] px-4 py-3 mb-2 text-lg font-nunito-bold text-principal border border-neutro text-center tracking-[6px]"
-                  placeholder="000000"
-                  placeholderTextColor={Paleta.neutro}
-                  value={pinIngresado}
-                  onChangeText={v => { setPinIngresado(v.replace(/\D/g, '').slice(0, 6)); setErrorPin(''); }}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                />
-                {errorPin ? (
-                  <Text className="text-error text-[13px] font-nunito text-center mb-2">{errorPin}</Text>
-                ) : null}
-                <Pressable
-                  onPress={verificarPin}
-                  className="bg-white rounded-xl py-3 items-center border-[1.5px] border-principal active:opacity-70">
-                  <Text className="text-principal text-sm font-nunito-bold">Verificar código</Text>
-                </Pressable>
+
+                {pinVerificado ? (
+                  <View className="flex-row items-center">
+                    <MaterialIcons name="check-circle" size={20} color={Paleta.exito} />
+                    <Text className="text-principal text-sm font-nunito-semi ml-2">
+                      Código verificado. El trabajador puede arrancar.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text className="text-neutro text-xs font-nunito mb-2 leading-4">
+                      Si querés chequear que te lo repita bien, ingresalo acá.
+                    </Text>
+                    <TextInput
+                      className="bg-fondo-suave rounded-[10px] px-4 py-3 mb-2 text-lg font-nunito-bold text-principal border border-neutro text-center tracking-[6px]"
+                      placeholder="000000"
+                      placeholderTextColor={Paleta.neutro}
+                      value={pinIngresado}
+                      onChangeText={v => { setPinIngresado(v.replace(/\D/g, '').slice(0, 6)); setErrorPin(''); }}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                    {errorPin ? (
+                      <Text className="text-error text-[13px] font-nunito text-center mb-2">{errorPin}</Text>
+                    ) : null}
+                    <Pressable
+                      onPress={verificarPin}
+                      className="bg-white rounded-xl py-3 items-center border-[1.5px] border-principal active:opacity-70">
+                      <Text className="text-principal text-sm font-nunito-bold">Verificar código</Text>
+                    </Pressable>
+                  </>
+                )}
               </>
+            ) : (
+              <Text className="text-neutro text-sm font-nunito leading-5">
+                El PIN solo se puede ver en el celular desde el que publicaste el trabajo.
+              </Text>
             )}
           </View>
         ) : null}
@@ -270,20 +276,12 @@ export default function SeguimientoScreen() {
             </Text>
 
             <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-5">
-              {trabajo.evidencia_url ? (
-                <Image
-                  source={{ uri: trabajo.evidencia_url }}
-                  style={{ width: '100%', height: 200 }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View className="h-32 items-center justify-center">
-                  <MaterialIcons name="hourglass-empty" size={28} color={Paleta.neutro} />
-                  <Text className="text-neutro text-sm font-nunito mt-2">
-                    Esperando la foto del trabajador
-                  </Text>
-                </View>
-              )}
+              <View className="h-32 items-center justify-center">
+                <MaterialIcons name="hourglass-empty" size={28} color={Paleta.neutro} />
+                <Text className="text-neutro text-sm font-nunito mt-2">
+                  Esperando la foto del trabajador
+                </Text>
+              </View>
             </View>
 
             {error ? (

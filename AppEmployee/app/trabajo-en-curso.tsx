@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   Text,
@@ -15,23 +16,17 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getUsuario } from '../auth';
 import { supabase } from '../supabaseClient';
-import { seguirUbicacion, type Coordenadas } from '../lib/ubicacion';
-import {
-  obtenerTrabajo,
-  validarPin,
-  completarTrabajo,
-  enviarPosicionDeTrabajo,
-  type Trabajo,
-} from '../lib/trabajo';
+import { seguirUbicacion, distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
+import { obtenerTrabajo, validarPin, completarTrabajo, type Trabajo } from '../lib/trabajos';
 import { Paleta } from '@/constants/theme';
 
 // Pantalla de trabajo en curso. Cubre los tres momentos del trabajo aceptado:
-//   1. `asignado`    → mostrar la dirección y pedir el PIN que dicta el empleador
+//   1. `asignado`    → mostrar dónde es y pedir el PIN que dicta el empleador
 //   2. `en_progreso` → subir la foto de evidencia y marcar como finalizado
 //   3. `completado`  → confirmación
 //
 // Mientras la pantalla está viva, la ubicación del trabajador se manda al backend
-// para que el empleador lo vea moverse en su mapa.
+// cada 10 segundos, asociada a este trabajo.
 export default function TrabajoEnCursoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -61,7 +56,7 @@ export default function TrabajoEnCursoScreen() {
     if (!trabajoId) { setError('No se recibió el trabajo.'); setCargando(false); return; }
 
     obtenerTrabajo(trabajoId)
-      .then(t => {
+      .then(({ trabajo: t }) => {
         if (!activo) return;
         setTrabajo(t);
         if (t.estado === 'completado') setFinalizado(true);
@@ -72,7 +67,7 @@ export default function TrabajoEnCursoScreen() {
     return () => { activo = false; };
   }, [trabajoId]);
 
-  // ----- Ubicación en tiempo real hacia el empleador -----
+  // ----- Ubicación en tiempo real -----
   // Arranca apenas se acepta el trabajo y se corta al finalizar o al salir de la pantalla.
   const usuarioIdRef = useRef('');
 
@@ -82,19 +77,12 @@ export default function TrabajoEnCursoScreen() {
     let cortar: (() => void) | null = null;
     let activo = true;
 
-    (async () => {
-      const u = await getUsuario();
+    getUsuario().then(u => {
       if (!u || !activo) return;
       usuarioIdRef.current = u.id;
-
-      cortar = await seguirUbicacion(coords => {
-        setUltimaPos(coords);
-        // Fire and forget: si el endpoint de Ignacio todavía no existe, no rompe la pantalla.
-        enviarPosicionDeTrabajo(trabajoId, u.id, coords).catch(e =>
-          console.log('No se pudo enviar la posición:', e?.message),
-        );
-      });
-    })();
+      // Si falla el envío (red, backend caído) se loguea y no rompe la pantalla.
+      cortar = seguirUbicacion(u.id, setUltimaPos, trabajoId);
+    });
 
     return () => { activo = false; cortar?.(); };
   }, [trabajoId, finalizado]);
@@ -105,11 +93,14 @@ export default function TrabajoEnCursoScreen() {
     if (pin.length !== 6) { setErrorPin('El PIN tiene 6 dígitos.'); return; }
 
     setValidando(true);
-    const r = await validarPin(trabajoId!, pin);
-    setValidando(false);
-
-    if (!r.ok) { setErrorPin(r.mensaje); return; }
-    setTrabajo(t => (t ? { ...t, estado: 'en_progreso' } : t));
+    try {
+      await validarPin(trabajoId!, pin);
+      setTrabajo(t => (t ? { ...t, estado: 'en_progreso' } : t));
+    } catch (e: any) {
+      setErrorPin(e?.message ?? 'No pudimos validar el PIN.');
+    } finally {
+      setValidando(false);
+    }
   }
 
   // ----- Foto de evidencia -----
@@ -223,6 +214,7 @@ export default function TrabajoEnCursoScreen() {
   }
 
   const esperandoPin = trabajo.estado === 'asignado';
+  const lugar = { lat: trabajo.latitud, lng: trabajo.longitud };
 
   return (
     <ScrollView
@@ -245,17 +237,27 @@ export default function TrabajoEnCursoScreen() {
       <Text className="text-principal text-2xl font-nunito-bold mb-1">{trabajo.titulo}</Text>
       <Text className="text-neutro text-sm font-nunito mb-5">{trabajo.descripcion}</Text>
 
-      {/* Dirección */}
+      {/* Lugar del trabajo */}
       <View className="bg-white border border-neutro rounded-xl p-4 mb-3">
         <View className="flex-row items-start">
           <MaterialIcons name="place" size={20} color={Paleta.principal} />
           <View className="flex-1 ml-2.5">
-            <Text className="text-neutro text-xs font-nunito mb-0.5">Dirección del trabajo</Text>
+            <Text className="text-neutro text-xs font-nunito mb-0.5">Lugar del trabajo</Text>
             <Text className="text-principal text-base font-nunito-semi">
-              {trabajo.direccion || 'El empleador todavía no cargó la dirección'}
+              {ultimaPos
+                ? `A ${formatearDistancia(distanciaKm(ultimaPos, lugar))} de donde estás`
+                : 'La ubicación que marcó el empleador'}
             </Text>
           </View>
         </View>
+        <Pressable
+          onPress={() =>
+            Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lugar.lat},${lugar.lng}`)
+          }
+          className="flex-row items-center justify-center mt-3 py-2.5 rounded-lg border border-principal active:opacity-70">
+          <MaterialIcons name="directions" size={18} color={Paleta.principal} />
+          <Text className="text-principal text-sm font-nunito-bold ml-1.5">Cómo llegar</Text>
+        </Pressable>
       </View>
 
       {/* Aviso de ubicación compartida */}
@@ -263,8 +265,8 @@ export default function TrabajoEnCursoScreen() {
         <MaterialIcons name="my-location" size={18} color={Paleta.principal} />
         <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
           {ultimaPos
-            ? 'El empleador está viendo tu ubicación en tiempo real.'
-            : 'Activando el envío de tu ubicación al empleador…'}
+            ? 'Estás compartiendo tu ubicación mientras dure el trabajo.'
+            : 'Activando el envío de tu ubicación…'}
         </Text>
       </View>
 

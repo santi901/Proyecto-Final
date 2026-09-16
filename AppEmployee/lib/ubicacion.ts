@@ -1,9 +1,8 @@
 import * as Location from 'expo-location';
+import { API_URL, getAccessToken } from '../auth';
+import { fetchConTimeout } from './fetchConTimeout';
 
-// Backend de Ignacio (NestJS) — es distinto al backend de Nico (auth).
-// Reemplazá esta URL por la de ngrok que te pase Nacho, o definí EXPO_PUBLIC_NACHO_API_URL en un .env.
-export const NACHO_API_URL =
-  process.env.EXPO_PUBLIC_NACHO_API_URL ?? 'https://TU_URL.ngrok-free.app';
+const INTERVALO_UBICACION_MS = 10000;
 
 export type Coordenadas = { lat: number; lng: number };
 
@@ -34,35 +33,63 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
   }
 }
 
-// Sigue la posición del trabajador mientras va al trabajo y llama a `alMoverse` cada
-// vez que cambia. Devuelve una función para cortar el seguimiento (hay que llamarla
-// al desmontar la pantalla, si no el GPS queda prendido).
-export async function seguirUbicacion(
-  alMoverse: (coords: Coordenadas) => void,
-): Promise<() => void> {
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  if (status !== 'granted') return () => {};
-
-  const suscripcion = await Location.watchPositionAsync(
-    { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
-    pos => alMoverse({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-  );
-
-  return () => suscripcion.remove();
-}
-
-// Envía las coordenadas al backend de Nacho para que las guarde en la base de datos.
-// Contrato a acordar con backend: POST /location  body { userId, lat, lng }
-// (el endpoint todavía no existe en Nacho-Back; el front ya queda listo para cuando exista)
-export async function enviarUbicacion(coords: Coordenadas, userId: string): Promise<void> {
-  const res = await fetch(`${NACHO_API_URL}/location`, {
+// Envía las coordenadas al backend para que las guarde en la base de datos.
+// POST /api/ubicacion/actualizar-ubicacion  body { workerId, lat, lng, jobId? }  (requiere sesión)
+export async function enviarUbicacion(coords: Coordenadas, workerId: string, jobId?: string): Promise<void> {
+  const token = await getAccessToken();
+  const res = await fetchConTimeout(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, lat: coords.lat, lng: coords.lng }),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ workerId, lat: coords.lat, lng: coords.lng, ...(jobId ? { jobId } : {}) }),
   });
 
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     throw new Error(`Error al enviar la ubicación (${res.status}). ${txt}`);
   }
+}
+
+// Repite el envío de la ubicación cada 10s mientras la pantalla esté montada (según lo acordado
+// con Santi: el trabajador manda su GPS periódicamente). Asume que el permiso ya fue otorgado.
+// Devuelve una función para cortar el seguimiento (llamarla al desmontar la pantalla).
+export function seguirUbicacion(
+  workerId: string,
+  onCoords?: (coords: Coordenadas) => void,
+  jobId?: string,
+): () => void {
+  let activo = true;
+
+  const tick = async () => {
+    const r = await pedirUbicacion();
+    if (!activo || r.estado !== 'ok') return;
+    onCoords?.(r.coords);
+    enviarUbicacion(r.coords, workerId, jobId).catch(e =>
+      console.log('No se pudo enviar la ubicación:', e?.message),
+    );
+  };
+
+  const id = setInterval(tick, INTERVALO_UBICACION_MS);
+  return () => {
+    activo = false;
+    clearInterval(id);
+  };
+}
+
+// Distancia en línea recta entre dos puntos, en km (Haversine, la misma cuenta que
+// `backend/src/utils/haversine.js`).
+export function distanciaKm(a: Coordenadas, b: Coordenadas): number {
+  const rad = (grados: number) => (grados * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+export function formatearDistancia(km: number): string {
+  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1).replace('.', ',')} km`;
 }

@@ -13,8 +13,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleado } from '../auth';
+import { registrarEmpleado, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import SelectorCategorias from '../components/selector-categorias';
@@ -58,8 +59,8 @@ export default function RegisterScreen() {
   const [cargando, setCargando] = useState(false);
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Estado del sistema de verificación de identidad de Ignacio:
-  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint /verificacion/comparar-caras
+  // Estado del sistema de verificación de identidad (backend único de Express, POST /api/verificacion/comparar-caras):
+  // procesando = esperando respuesta, aprobado/rechazado = resultado del endpoint
   const [verifEstado, setVerifEstado] = useState<'procesando' | 'aprobado' | 'rechazado' | null>(null);
   const [verifMensaje, setVerifMensaje] = useState('');
 
@@ -87,11 +88,10 @@ export default function RegisterScreen() {
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: 'base64',
     });
-    const blob = await fetch(`data:image/${ext};base64,${base64}`).then(r => r.blob());
 
     const { error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
+      .upload(fileName, decodeBase64(base64), { upsert: true, contentType: `image/${ext}` });
 
     if (error) throw error;
 
@@ -116,16 +116,19 @@ export default function RegisterScreen() {
       return;
     }
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
     setPaso(2);
@@ -176,19 +179,22 @@ export default function RegisterScreen() {
     }
   
     const partes = form.fecha_nacimiento.split('/');
+    const [dia, mes, anio] = partes.map(Number);
+    const anioActual = new Date().getFullYear();
     if (
       partes.length !== 3 ||
       partes[0].length !== 2 ||
       partes[1].length !== 2 ||
       partes[2].length !== 4 ||
-      isNaN(Number(partes[0])) ||
-      isNaN(Number(partes[1])) ||
-      isNaN(Number(partes[2]))
+      isNaN(dia) || isNaN(mes) || isNaN(anio) ||
+      dia < 1 || dia > 31 ||
+      mes < 1 || mes > 12 ||
+      anio < 1900 || anio > anioActual
     ) {
-      setError('La fecha debe tener el formato DD/MM/AAAA.');
+      setError('La fecha debe tener el formato DD/MM/AAAA y ser una fecha válida.');
       return;
     }
-  
+
     const fechaFormateada = `${partes[2]}-${partes[1]}-${partes[0]}`;
   
     setCargando(true);
@@ -210,29 +216,30 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-  
-      const responseDni = await fetch(fotoDni!);
-      const blobDni = await responseDni.blob();
-      formData.append('imagenes', blobDni, `dni-${form.dni}.jpg`);
-  
-      const responseSelfie = await fetch(fotoPerfil!);
-      const blobSelfie = await responseSelfie.blob();
-      formData.append('imagenes', blobSelfie, `selfie-${form.dni}.jpg`);
-  
+      formData.append('dni', {
+        uri: fotoDni!,
+        name: `dni-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
+      formData.append('selfie', {
+        uri: fotoPerfil!,
+        name: `selfie-${form.dni}.jpg`,
+        type: 'image/jpeg',
+      } as any);
       formData.append('userId', form.dni);
-  
-      const verificacion = await fetch('https://TU_URL.ngrok-free.app/verificacion/comparar-caras', {
+
+      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
         method: 'POST',
         body: formData,
       });
   
       const resultado = await verificacion.json();
       console.log('Resultado AWS:', resultado);
-  
-      if (resultado.estado !== 'aprobado') {
+
+      if (!verificacion.ok || resultado.estado !== 'aprobado') {
         const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
         setVerifMensaje(
-          resultado.mensaje ||
+          resultado.mensaje || resultado.error || resultado.message ||
             `Las fotos no coinciden${sim}. Asegurate de que la selfie y la foto del DNI sean de la misma persona.`,
         );
         setVerifEstado('rechazado');
@@ -241,7 +248,8 @@ export default function RegisterScreen() {
       }
 
     } catch (e: any) {
-      setVerifMensaje('No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.');
+      console.error('Error en verificación (detalle técnico):', e);
+      setVerifMensaje(`No pudimos conectarnos para verificar tu identidad. Revisá tu conexión e intentá de nuevo.\n\n[debug: ${e?.name || 'Error'}: ${e?.message || String(e)}]`);
       setVerifEstado('rechazado');
       setCargando(false);
       return;

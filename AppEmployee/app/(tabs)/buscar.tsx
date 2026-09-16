@@ -12,13 +12,20 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useBottomTabBarHeight } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
-import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import {
+  pedirUbicacion,
+  enviarUbicacion,
+  seguirUbicacion,
+  distanciaKm,
+  formatearDistancia,
+  type Coordenadas,
+} from '../../lib/ubicacion';
+import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 import ModalSolicitud from '../../components/modal-solicitud';
-import { listarDisponibles, aceptarTrabajo, type Trabajo } from '../../lib/trabajo';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -34,7 +41,6 @@ export default function BuscarTrabajoScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
 
-  const [seleccion, setSeleccion] = useState<number | null>(null);
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
   const [perfilAbierto, setPerfilAbierto] = useState(false);
@@ -47,7 +53,7 @@ export default function BuscarTrabajoScreen() {
 
   // Pide el permiso de ubicación. Si lo otorgan, obtiene las coordenadas, las muestra
   // en el mapa y se las manda al backend. Si no, deja el estado en 'denegado' (bloquea el uso).
-  async function iniciarUbicacion(userId: string) {
+  async function iniciarUbicacion(userId: string): Promise<EstadoUbicacion> {
     setUbicEstado('cargando');
     setErrorUbic('');
 
@@ -56,7 +62,7 @@ export default function BuscarTrabajoScreen() {
     if (r.estado === 'ok') {
       setCoords(r.coords);
       setUbicEstado('ok');
-      // Mandar al backend de Nacho (no bloquea la UI si falla la red / el endpoint aún no existe)
+      // Mandar al backend (no bloquea la UI si falla la red)
       enviarUbicacion(r.coords, userId).catch(e =>
         console.log('No se pudo enviar la ubicación:', e?.message),
       );
@@ -66,48 +72,71 @@ export default function BuscarTrabajoScreen() {
       setErrorUbic(r.mensaje);
       setUbicEstado('error');
     }
+    return r.estado;
   }
 
-  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación.
+  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación y,
+  // si se obtuvo bien, el seguimiento periódico (cada 10s) mientras la pantalla esté abierta.
   useEffect(() => {
     let activo = true;
-    getUsuario().then(u => {
+    let detenerSeguimiento: (() => void) | undefined;
+
+    getUsuario().then(async u => {
       if (!activo) return;
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleado');
       setUsuarioId(u.id);
       // Bloquear acceso si la identidad todavía no está verificada
       if (u.verificado === false) { setAccesoBloqueado(true); return; }
-      iniciarUbicacion(u.id);
+      const estado = await iniciarUbicacion(u.id);
+      if (activo && estado === 'ok') {
+        detenerSeguimiento = seguirUbicacion(u.id, setCoords);
+      }
     });
-    return () => { activo = false; };
+
+    return () => { activo = false; detenerSeguimiento?.(); };
   }, [router]);
 
-  // ----- Búsqueda de trabajo y solicitud entrante -----
+  // ----- Trabajos disponibles y solicitud entrante -----
+  const [trabajos, setTrabajos] = useState<Trabajo[] | null>(null);
+  const [errorTrabajos, setErrorTrabajos] = useState('');
   const [buscando, setBuscando] = useState(false);
   const [solicitud, setSolicitud] = useState<Trabajo | null>(null);
   const [aceptando, setAceptando] = useState(false);
   const [errorBusqueda, setErrorBusqueda] = useState('');
-  // Trabajos que el trabajador ya rechazó: no se los volvemos a ofrecer en esta sesión.
+  // Trabajos que el trabajador ya rechazó: la búsqueda automática no se los vuelve a ofrecer.
   const rechazados = useRef<Set<string>>(new Set());
 
+  // Trae los trabajos 'pendiente' disponibles. Se llama al obtener la ubicación,
+  // desde el botón de actualizar y en cada vuelta de la búsqueda automática.
+  async function cargarTrabajos(): Promise<Trabajo[] | null> {
+    try {
+      const { trabajos } = await listarTrabajos();
+      setTrabajos(trabajos);
+      setErrorTrabajos('');
+      return trabajos;
+    } catch (e: any) {
+      setErrorTrabajos(e?.message || 'No pudimos cargar los trabajos disponibles.');
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    if (ubicEstado === 'ok') cargarTrabajos();
+  }, [ubicEstado]);
+
   // Mientras está buscando y no hay una solicitud en pantalla, consulta al backend
-  // cada 4 segundos si apareció algún trabajo disponible.
+  // cada 4 segundos si apareció algún trabajo que todavía no rechazó.
   useEffect(() => {
     if (!buscando || solicitud) return;
 
     let activo = true;
 
     async function consultar() {
-      try {
-        const trabajos = await listarDisponibles();
-        if (!activo) return;
-        const proximo = trabajos.find(t => !rechazados.current.has(t.id));
-        if (proximo) setSolicitud(proximo);
-        setErrorBusqueda('');
-      } catch (e: any) {
-        if (activo) setErrorBusqueda(e?.message ?? 'No pudimos buscar trabajos.');
-      }
+      const disponibles = await cargarTrabajos();
+      if (!activo || !disponibles) return;
+      const proximo = disponibles.find(t => !rechazados.current.has(t.id));
+      if (proximo) setSolicitud(proximo);
     }
 
     consultar();
@@ -121,12 +150,14 @@ export default function BuscarTrabajoScreen() {
       await aceptarTrabajo(trabajo.id);
       setSolicitud(null);
       setBuscando(false);
+      setTrabajos(prev => prev?.filter(t => t.id !== trabajo.id) ?? prev);
       router.push({ pathname: '/trabajo-en-curso', params: { trabajoId: trabajo.id } } as any);
     } catch (e: any) {
-      // Si otro trabajador lo tomó primero, se descarta y se sigue buscando.
+      // Si otro trabajador lo tomó primero (o la solicitud expiró), se descarta y se sigue buscando.
       rechazados.current.add(trabajo.id);
       setSolicitud(null);
       setErrorBusqueda(e?.message ?? 'No pudimos aceptar el trabajo.');
+      cargarTrabajos();
     } finally {
       setAceptando(false);
     }
@@ -310,45 +341,10 @@ export default function BuscarTrabajoScreen() {
           contentContainerStyle={{ paddingTop: 8, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled">
-          {/* Grilla de opciones */}
-          <View className="flex-row flex-wrap justify-between mb-5">
-            {[0, 1, 2, 3, 4, 5].map((i) => {
-              const sel = seleccion === i;
-              return (
-                <Pressable
-                  key={i}
-                  onPress={() => setSeleccion(i)}
-                  className={`w-[31%] aspect-[4/3] rounded-xl mb-3 border ${
-                    sel ? 'border-principal bg-acento' : 'border-neutro bg-fondo-suave'
-                  }`}>
-                  <View className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-principal items-center justify-center">
-                    <Text className="text-white text-[9px] font-nunito-bold">i</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Ayuda + Método de cobro */}
-          <View className="flex-row gap-3 mb-6">
-            <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
-              <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
-            </Pressable>
-
-            <Pressable className="flex-1 flex-row items-center justify-between bg-fondo-suave rounded-[10px] px-4 py-3 border border-neutro">
-              <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
-              <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
-            </Pressable>
-          </View>
-
-          {errorBusqueda ? (
-            <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorBusqueda}</Text>
-          ) : null}
-
-          {/* Botón principal */}
+          {/* Botón principal: búsqueda automática con solicitud entrante */}
           <Pressable
             onPress={() => { setErrorBusqueda(''); setBuscando(b => !b); }}
-            className={`rounded-xl py-4 items-center active:opacity-90 ${
+            className={`rounded-xl py-4 items-center active:opacity-90 mb-3 ${
               buscando ? 'bg-white border-[1.5px] border-principal' : 'bg-principal'
             }`}>
             {buscando ? (
@@ -362,12 +358,90 @@ export default function BuscarTrabajoScreen() {
               <Text className="text-white text-base font-nunito-bold">Buscar Trabajo</Text>
             )}
           </Pressable>
+
+          {errorBusqueda ? (
+            <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorBusqueda}</Text>
+          ) : null}
+
+          {/* Trabajos disponibles */}
+          <View className="flex-row items-center justify-between mt-2 mb-3">
+            <Text className="text-[13px] font-nunito-semi text-principal">Trabajos disponibles</Text>
+            <Pressable onPress={() => cargarTrabajos()} className="p-1 active:opacity-60">
+              <MaterialIcons name="refresh" size={20} color={Paleta.principal} />
+            </Pressable>
+          </View>
+
+          {trabajos === null && !errorTrabajos && (
+            <View className="items-center py-8">
+              <ActivityIndicator color={Paleta.principal} />
+              <Text className="text-neutro text-sm font-nunito mt-3">Buscando trabajos disponibles…</Text>
+            </View>
+          )}
+
+          {!!errorTrabajos && (
+            <View className="items-center py-6">
+              <Text className="text-error text-sm font-nunito text-center mb-3">{errorTrabajos}</Text>
+              <Pressable
+                onPress={() => cargarTrabajos()}
+                className="px-4 py-2 rounded-lg border border-principal active:opacity-70">
+                <Text className="text-principal text-sm font-nunito-semi">Reintentar</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {trabajos !== null && !errorTrabajos && trabajos.length === 0 && (
+            <View className="items-center py-8">
+              <MaterialIcons name="search-off" size={32} color={Paleta.neutro} />
+              <Text className="text-neutro text-sm font-nunito mt-3 text-center">
+                No hay trabajos disponibles por ahora.
+              </Text>
+            </View>
+          )}
+
+          {trabajos !== null && trabajos.length > 0 && (
+            <View className="mb-3">
+              {trabajos.map(t => (
+                <Pressable
+                  key={t.id}
+                  onPress={() => { setErrorBusqueda(''); setSolicitud(t); }}
+                  className="bg-fondo-suave rounded-xl border border-neutro p-4 mb-3 active:opacity-70">
+                  <View className="flex-row justify-between items-start mb-1">
+                    <Text className="text-base font-nunito-bold text-principal flex-1 pr-2">{t.titulo}</Text>
+                    <Text className="text-base font-nunito-bold text-principal">${t.precio}</Text>
+                  </View>
+                  <Text className="text-[13px] font-nunito text-neutro mb-1">
+                    {t.categoria}
+                    {t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''}
+                    {coords
+                      ? ` · a ${formatearDistancia(distanciaKm(coords, { lat: t.latitud, lng: t.longitud }))}`
+                      : ''}
+                  </Text>
+                  <Text className="text-sm font-nunito text-neutro" numberOfLines={2}>
+                    {t.descripcion}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {/* Ayuda + Método de cobro */}
+          <View className="flex-row gap-3 mb-6">
+            <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
+              <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
+            </Pressable>
+
+            <Pressable className="flex-1 flex-row items-center justify-between bg-fondo-suave rounded-[10px] px-4 py-3 border border-neutro">
+              <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
+              <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
+            </Pressable>
+          </View>
         </ScrollView>
       </Animated.View>
 
       {/* Solicitud entrante con timer */}
       <ModalSolicitud
         trabajo={aceptando ? null : solicitud}
+        miUbicacion={coords}
         onAceptar={handleAceptar}
         onRechazar={handleRechazar}
         onVencer={handleRechazar}

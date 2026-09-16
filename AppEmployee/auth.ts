@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchConTimeout } from './lib/fetchConTimeout';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -52,32 +53,36 @@ export async function limpiarSesion() {
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
-async function post(path: string, body: object, token?: string) {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${API_URL}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+// Si el servidor responde algo que no es JSON (ej. la página de error de un túnel caído),
+// se toma como respuesta vacía para mostrar el error genérico en vez de un SyntaxError.
+async function leerRespuesta(res: Response) {
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Error del servidor');
   return data;
 }
 
+async function post(path: string, body: object, token?: string) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetchConTimeout(`${API_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  return leerRespuesta(res);
+}
+
 // Llamadas autenticadas al backend de Nico: agregan solas el token guardado.
-// Las usa `lib/trabajo.ts` para todo el flujo de solicitud / PIN / finalización.
+// Las usan `lib/trabajos.ts` y `lib/perfil.ts`.
 
 export async function apiGet(path: string) {
   const token = await getAccessToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${path}`, { headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Error del servidor');
-  return data;
+  const res = await fetchConTimeout(`${API_URL}${path}`, { headers });
+  return leerRespuesta(res);
 }
 
 export async function apiPost(path: string, body: object = {}) {

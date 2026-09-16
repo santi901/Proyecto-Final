@@ -13,12 +13,12 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useBottomTabBarHeight } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
-import { pedirUbicacion, enviarUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
+import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
-import { crearTrabajo } from '../../lib/trabajo';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -59,7 +59,7 @@ export default function OfrecerTrabajoScreen() {
 
   // Pide el permiso de ubicación. Si lo otorgan, obtiene las coordenadas, las muestra
   // en el mapa y se las manda al backend. Si no, deja el estado en 'denegado' (bloquea el uso).
-  async function iniciarUbicacion(userId: string) {
+  async function iniciarUbicacion(userId: string): Promise<EstadoUbicacion> {
     setUbicEstado('cargando');
     setErrorUbic('');
 
@@ -68,7 +68,7 @@ export default function OfrecerTrabajoScreen() {
     if (r.estado === 'ok') {
       setCoords(r.coords);
       setUbicEstado('ok');
-      // Mandar al backend de Nacho (no bloquea la UI si falla la red / el endpoint aún no existe)
+      // Mandar al backend (no bloquea la UI si falla la red)
       enviarUbicacion(r.coords, userId).catch(e =>
         console.log('No se pudo enviar la ubicación:', e?.message),
       );
@@ -78,19 +78,27 @@ export default function OfrecerTrabajoScreen() {
       setErrorUbic(r.mensaje);
       setUbicEstado('error');
     }
+    return r.estado;
   }
 
-  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación.
+  // Solo accesible con sesión activa. Con sesión OK, arranca el flujo de ubicación y,
+  // si se obtuvo bien, el seguimiento periódico (cada 10s) mientras la pantalla esté abierta.
   useEffect(() => {
     let activo = true;
-    getUsuario().then(u => {
+    let detenerSeguimiento: (() => void) | undefined;
+
+    getUsuario().then(async u => {
       if (!activo) return;
       if (!u) { router.replace('/'); return; }
       setUsuario(u.email || 'Empleador');
       setUsuarioId(u.id);
-      iniciarUbicacion(u.id);
+      const estado = await iniciarUbicacion(u.id);
+      if (activo && estado === 'ok') {
+        detenerSeguimiento = seguirUbicacion(u.id, setCoords);
+      }
     });
-    return () => { activo = false; };
+
+    return () => { activo = false; detenerSeguimiento?.(); };
   }, [router]);
 
   // ----- Publicación del trabajo -----
@@ -99,8 +107,9 @@ export default function OfrecerTrabajoScreen() {
 
   const precio = dificultad ? PRECIOS[dificultad] : null;
 
-  // Publica el trabajo y salta al seguimiento. El PIN viaja por parámetro porque el
-  // backend lo devuelve una sola vez, acá: no hay forma de volver a pedirlo después.
+  // Publica el trabajo (en la ubicación actual del empleador) y salta al seguimiento.
+  // El backend devuelve el PIN una sola vez, acá: se guarda en el dispositivo para
+  // poder mostrarlo en el seguimiento y en "Mis trabajos".
   async function handleOfrecer() {
     setErrorPublicar('');
 
@@ -108,6 +117,7 @@ export default function OfrecerTrabajoScreen() {
     if (categoria === null) { setErrorPublicar('Elegí una categoría.'); return; }
     if (!descripcion.trim()) { setErrorPublicar('Escribí una descripción.'); return; }
     if (!dificultad || precio === null) { setErrorPublicar('Elegí la dificultad del trabajo.'); return; }
+    if (!coords) { setErrorPublicar('No pudimos obtener tu ubicación. Reintentá desde el mapa.'); return; }
 
     setPublicando(true);
     try {
@@ -117,9 +127,18 @@ export default function OfrecerTrabajoScreen() {
         categoria: CATEGORIAS[categoria],
         nivelDificultad: dificultad,
         precio,
+        latitud: coords.lat,
+        longitud: coords.lng,
       });
 
-      router.push({ pathname: '/seguimiento', params: { trabajoId: trabajo.id, pin } } as any);
+      await guardarPinLocal(trabajo.id, pin);
+
+      setTitulo('Nuevo Trabajo');
+      setDescripcion('');
+      setCategoria(null);
+      setDificultad(null);
+
+      router.push({ pathname: '/seguimiento', params: { trabajoId: trabajo.id } } as any);
     } catch (e: any) {
       setErrorPublicar(e?.message ?? 'No pudimos publicar el trabajo.');
     } finally {
@@ -380,9 +399,11 @@ export default function OfrecerTrabajoScreen() {
             onPress={handleOfrecer}
             disabled={publicando}
             className="bg-principal rounded-xl py-4 items-center active:opacity-90">
-            <Text className="text-white text-base font-nunito-bold">
-              {publicando ? 'Publicando…' : 'Ofrecer Trabajo'}
-            </Text>
+            {publicando ? (
+              <ActivityIndicator color={Paleta.blanco} />
+            ) : (
+              <Text className="text-white text-base font-nunito-bold">Ofrecer Trabajo</Text>
+            )}
           </Pressable>
         </ScrollView>
       </Animated.View>
