@@ -1,5 +1,18 @@
 const supabase = require('../config/supabase')
-const { esParticipanteTrabajo: esParticipante } = require('../utils/participantes')
+
+// Devuelve el id de perfil/empleado del usuario autenticado si participa de ese
+// trabajo (como trabajador o como empleador), o null si no participa.
+async function esParticipante(trabajo, usuarioId, tipo) {
+  if (tipo === 'empleado') {
+    const { data: empleado } = await supabase
+      .from('empleados').select('id').eq('user_id', usuarioId).maybeSingle()
+    return !!empleado && trabajo.trabajador_id === empleado.id
+  }
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+  return !!perfil && trabajo.empleador_id === perfil.id
+}
 
 async function enviarMensaje(req, res) {
   const { id: trabajoId } = req.params
