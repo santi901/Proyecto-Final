@@ -62,7 +62,7 @@ Both routes are unauthenticated at the Nest layer — no guards are registered o
 
 ### Matching (`src/matching`)
 
-`GET /matching/trabajadores-disponibles?trabajoId=&radioKm=` finds `empleados` whose `categorias` include the job's `categoria`, within `radioKm` (or the worker's own `radio_busqueda`, default 10km) of the *employer's* stored lat/lng (jobs don't store their own coordinates — the employer's `perfiles` row is used instead), excluding workers currently tied to a job in `asignado`/`en_progreso`. Results are sorted by `reputacion` descending, distance ascending as the tiebreaker. This endpoint is server-to-server only — no app calls it directly yet.
+`GET /matching/trabajadores-disponibles?trabajoId=&radioKm=` finds `empleados` whose `categorias` include the job's `categoria`, within `radioKm` (or the worker's own `radio_busqueda`, default 10km) of the job's own `latitud`/`longitud` (the row on `trabajos`, set by `backend/` when the job is created), excluding workers currently tied to a job in `asignado`/`en_progreso`. Results are sorted by `reputacion` descending, distance ascending as the tiebreaker. This endpoint is called server-to-server by `backend/` (fire-and-forget, right after `crearTrabajo`) — no app calls it directly.
 
 ### Notificaciones (`src/notificaciones`)
 
@@ -70,7 +70,7 @@ Both routes are unauthenticated at the Nest layer — no guards are registered o
 
 ### Evidencia (`src/evidencia`)
 
-`POST /trabajos/:trabajoId/evidencia` (multipart field `foto`, body field `subidoPor`) uploads a completion photo via `StorageService` and inserts a row into `evidencias_trabajo` (`trabajo_id`, `s3_key`, `subido_por`, `creado_en`). `GET /trabajos/:trabajoId/evidencia` lists them, most recent first. `AppEmployee` uploads the photo from `trabajo-en-curso.tsx` right before completing a job and `AppEmployer` lists it in `seguimiento.tsx` (`lib/evidencia.ts` in each app). The rows only carry the S3 key, not a viewable URL, so the employer app can only render the image if the backend adds a (signed) `url` or `EXPO_PUBLIC_EVIDENCIA_BASE_URL` points at a publicly readable bucket.
+`POST /trabajos/:trabajoId/evidencia` (multipart field `foto`, body field `subidoPor`) uploads a completion photo via `StorageService` and inserts a row into `evidencias_trabajo` (`trabajo_id`, `s3_key`, `subido_por`, `creado_en`). `GET /trabajos/:trabajoId/evidencia` lists them, most recent first. Both responses add a signed `url` per row (`StorageService.obtenerUrlFirmada`, 1h expiry via `@aws-sdk/s3-request-presigner`) — the bucket is private, so `s3_key` alone isn't viewable by the app. `AppEmployee` uploads the photo from `trabajo-en-curso.tsx` right before completing a job and `AppEmployer` renders that signed `url` in `seguimiento.tsx` (`lib/evidencia.ts` in each app).
 
 ### Calificaciones (`src/calificaciones`)
 

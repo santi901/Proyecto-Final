@@ -31,7 +31,7 @@ export class MatchingService {
 
     const { data: trabajo, error: trabajoError } = await this.supabase
       .from('trabajos')
-      .select('id, categoria, empleador_id')
+      .select('id, categoria, empleador_id, latitud, longitud')
       .eq('id', trabajoId)
       .maybeSingle();
 
@@ -39,22 +39,9 @@ export class MatchingService {
       throw new BadRequestException('No se encontró el trabajo.');
     }
 
-    // El trabajo no guarda su propia lat/lng, así que se usa la ubicación
-    // del perfil del empleador que lo publicó.
-    const { data: empleador, error: empleadorError } = await this.supabase
-      .from('perfiles')
-      .select('lat, lng')
-      .eq('id', trabajo.empleador_id)
-      .maybeSingle();
-
-    if (
-      empleadorError ||
-      !empleador ||
-      empleador.lat == null ||
-      empleador.lng == null
-    ) {
+    if (trabajo.latitud == null || trabajo.longitud == null) {
       throw new BadRequestException(
-        'El empleador de este trabajo no tiene una ubicación cargada.',
+        'Este trabajo no tiene una ubicación cargada.',
       );
     }
 
@@ -99,8 +86,8 @@ export class MatchingService {
           (candidato.radio_busqueda as number) ??
           RADIO_BUSQUEDA_DEFAULT_KM,
         distanciaKm: calcularDistanciaKm(
-          empleador.lat as number,
-          empleador.lng as number,
+          trabajo.latitud as number,
+          trabajo.longitud as number,
           candidato.lat as number,
           candidato.lng as number,
         ),
