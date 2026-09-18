@@ -1,4 +1,4 @@
-import { apiGet, API_URL, getAccessToken } from '../auth';
+import { apiGet, fetchAutenticado } from '../auth';
 
 // Perfil del trabajador (backend de Nico, `backend/src/routes/empleados.js`).
 
@@ -45,13 +45,9 @@ export async function actualizarPerfil(datos: {
   lat: number | null;
   lng: number | null;
 }): Promise<PerfilEmpleado> {
-  const token = await getAccessToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${API_URL}/api/empleados/perfil`, {
+  const res = await fetchAutenticado('/api/empleados/perfil', {
     method: 'PUT',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(datos),
   });
 

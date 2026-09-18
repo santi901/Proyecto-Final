@@ -12,17 +12,35 @@ export const Paleta = {
   principal: '#0C1531',
   /** Amarillo. Acento: estado seleccionado, resaltados y detalles sobre el navy. */
   acento: '#FFD539',
-  /** Gris neutro. Texto secundario y bordes. */
+  /** Gris neutro. Texto secundario y bordes/sombras de chrome secundario. */
   neutro: '#909090',
   /** Fondo secundario (crema) de las pantallas. */
   fondo: '#FFFDF3',
   /** Variante más clara del fondo, para tarjetas apoyadas sobre el crema. */
-  fondoSuave: '#FFFEE9',
+  fondoSuave: '#FFFEF9',
   blanco: '#FFFFFF',
+  /** "Extras" de la lámina: bordes/sombras/destacados, siempre al 50% de opacidad salvo excepción puntual. */
+  rojo: '#FF0000',
+  verde: '#2AB511',
   /** Estados. No están en la lámina del design system: se eligieron para acompañarla. */
   error: '#E5484D',
   exito: '#2E9E5B',
 } as const;
+
+/**
+ * Sombra suave centrada que reemplaza los bordes de la lámina: en Figma el "spread" es
+ * 0 en casi todos los casos (acá, `radio` chico). La única excepción documentada es el
+ * selector de categoría seleccionado, con spread 2 — para eso se sube `radio`.
+ */
+export function sombra(color: string, opacidad = 0.7, radio = 3) {
+  return {
+    shadowColor: color,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: opacidad,
+    shadowRadius: radio,
+    elevation: radio,
+  } as const;
+}
 
 /**
  * Nunito Sans en los tres pesos de la lámina. Se cargan en `app/_layout.tsx`.

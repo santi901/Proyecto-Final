@@ -1,6 +1,5 @@
 import * as Location from 'expo-location';
-import { API_URL, getAccessToken } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import { fetchAutenticado } from '../auth';
 
 const INTERVALO_UBICACION_MS = 10000;
 
@@ -36,13 +35,9 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
 // Envía las coordenadas al backend para que las guarde en la base de datos.
 // POST /api/ubicacion/actualizar-ubicacion  body { workerId, lat, lng, jobId? }  (requiere sesión)
 export async function enviarUbicacion(coords: Coordenadas, workerId: string, jobId?: string): Promise<void> {
-  const token = await getAccessToken();
-  const res = await fetchConTimeout(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
+  const res = await fetchAutenticado('/api/ubicacion/actualizar-ubicacion', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workerId, lat: coords.lat, lng: coords.lng, ...(jobId ? { jobId } : {}) }),
   });
 
@@ -59,10 +54,7 @@ export async function enviarUbicacion(coords: Coordenadas, workerId: string, job
 // trabajador asignado (400) o el trabajador aún no compartió su GPS (404). Cualquier otra cosa
 // se propaga como error.
 export async function obtenerUbicacionTrabajador(trabajoId: string): Promise<Coordenadas | null> {
-  const token = await getAccessToken();
-  const res = await fetchConTimeout(`${API_URL}/api/trabajos/${trabajoId}/ubicacion-trabajador`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetchAutenticado(`/api/trabajos/${trabajoId}/ubicacion-trabajador`);
 
   if (res.status === 400 || res.status === 404) return null;
 

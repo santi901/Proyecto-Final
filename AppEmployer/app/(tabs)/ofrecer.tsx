@@ -7,6 +7,7 @@ import {
   Linking,
   Pressable,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -14,12 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
 import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
-import MapaUbicacion from '../../components/mapa-ubicacion';
 import BotonChat from '../../components/boton-chat';
-import PanelDeslizable from '../../components/panel-deslizable';
+import VistaFormulario from '../../components/vista-formulario';
 import CampoTexto from '../../components/campo-texto';
 import { activarNotificacionesPush } from '../../lib/notificaciones';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 
@@ -211,128 +211,139 @@ export default function OfrecerTrabajoScreen() {
     );
   }
 
-  // ----- Permiso OK: pantalla principal con el mapa de fondo -----
+  // ----- Permiso OK: pantalla principal -----
+  // El mapa ya no va de fondo acá: solo se muestra en /seguimiento, una vez que se
+  // publica el trabajo y arranca la búsqueda de trabajador (la ubicación se sigue
+  // pidiendo y mandando igual, solo que ya no se dibuja).
   return (
     <View className="flex-1 bg-fondo">
-      {/* Fondo del mapa con la ubicación actual del empleador */}
-      {coords && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-          <MapaUbicacion lat={coords.lat} lng={coords.lng} />
-        </View>
-      )}
-
-      {/* Barra superior de iconos (sobre el mapa) */}
+      {/* Barra superior de iconos */}
       <View
-        className="absolute left-0 right-0 flex-row items-center justify-between px-5"
-        style={{ top: insets.top + 8 }}>
-        <View className="w-11 h-11 rounded-full bg-acento items-center justify-center">
-          <MaterialIcons name="home" size={24} color={Paleta.principal} />
+        className="flex-row items-center justify-between px-5 pb-3"
+        style={{ paddingTop: insets.top + 8 }}>
+        <View className="w-11 h-11 rounded-full bg-principal items-center justify-center">
+          <MaterialIcons name="home" size={22} color={Paleta.blanco} />
         </View>
         <View className="flex-row gap-3">
           <BotonChat />
           <Pressable
             onPress={abrirPerfil}
-            className="w-11 h-11 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">
-            <MaterialIcons name="person-outline" size={24} color={Paleta.principal} />
+            style={sombra(Paleta.neutro, 0.4, 3)}
+            className="w-11 h-11 rounded-full bg-white items-center justify-center active:opacity-70">
+            <MaterialIcons name="person-outline" size={22} color={Paleta.principal} />
           </Pressable>
         </View>
       </View>
 
-      {/* Panel deslizable sobre el mapa: arranca bajado y nunca tapa el mapa del todo */}
-      <PanelDeslizable
-        proporcion={0.74}
-        asoma={248}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 48 }}
-        cabecera={
-          <View className="px-5 pb-3 border-b border-neutro/40">
-            <View className="flex-row items-center gap-3">
-              <View className="bg-acento rounded-full px-4 py-2">
-                <Text className="text-[15px] font-nunito-bold text-principal">Ofrecer trabajo</Text>
-              </View>
-              <MaterialIcons name="favorite-border" size={22} color={Paleta.principal} />
-              <MaterialIcons name="history" size={22} color={Paleta.principal} />
+      <VistaFormulario className="flex-1" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
+        {/* Tarjeta: pestañas (Ofrecer trabajo / favoritos / historial) + campos del trabajo */}
+        <View style={sombra(Paleta.acento, 0.6, 4)} className="rounded-[24px] overflow-hidden mb-6">
+          <View className="flex-row items-stretch bg-acento">
+            <View className="bg-principal px-5 py-4 justify-center">
+              <Text className="text-acento text-[15px] font-nunito-bold">Ofrecer trabajo</Text>
+            </View>
+            <View className="flex-1 flex-row items-center justify-center gap-7">
+              <MaterialIcons name="favorite" size={20} color={Paleta.principal} />
+              <MaterialIcons name="history" size={20} color={Paleta.principal} />
             </View>
           </View>
-        }>
-        {/* Título */}
-        <Text className="text-[13px] font-nunito-semi text-principal mb-1.5">Título:</Text>
-        <View className="flex-row items-center bg-white rounded-[10px] pr-4 border border-neutro mb-5">
-          <CampoTexto
-            margenAbajo={false}
-            contenedorClassName="flex-1"
-            className="border-0 bg-transparent"
-            value={titulo}
-            onChangeText={setTitulo}
-            placeholder="Nuevo Trabajo"
-          />
-          <MaterialIcons name="edit" size={18} color={Paleta.principal} />
-        </View>
 
-        {/* Categoría */}
-        <Text className="text-[13px] font-nunito-semi text-principal mb-2">Categoría:</Text>
-        <View className="flex-row flex-wrap justify-between mb-5">
-          {CATEGORIAS.map((cat, i) => {
-            const sel = categoria === i;
-            return (
+          <View className="bg-fondo-suave px-5 pt-5 pb-6">
+            {/* Título: es texto editable, no va dentro de una caja */}
+            <View className="flex-row items-start justify-between mb-5">
+              <View className="flex-1 mr-3">
+                <Text className="text-[13px] font-nunito text-principal mb-1">Título:</Text>
+                <View className="flex-row items-center gap-2">
+                  <TextInput
+                    value={titulo}
+                    onChangeText={setTitulo}
+                    placeholder="Nuevo Trabajo"
+                    placeholderTextColor={Paleta.neutro}
+                    style={{ textDecorationLine: 'underline' }}
+                    className="flex-1 text-lg font-nunito-bold text-principal p-0"
+                  />
+                  <MaterialIcons name="edit" size={16} color={Paleta.principal} />
+                </View>
+              </View>
               <Pressable
-                key={cat}
-                onPress={() => setCategoria(i)}
-                className={`w-[31%] aspect-square rounded-xl mb-3 items-center justify-center border active:opacity-70 ${
-                  sel ? 'border-principal bg-acento' : 'border-neutro bg-white'
-                }`}>
-                <Text
-                  className={`text-[13px] text-center px-1 ${
-                    sel ? 'text-principal font-nunito-semi' : 'text-neutro font-nunito'
-                  }`}>
-                  {cat}
-                </Text>
+                style={sombra(Paleta.neutro, 0.4, 3)}
+                className="w-9 h-9 rounded-full bg-white items-center justify-center active:opacity-70">
+                <MaterialIcons name="favorite-border" size={16} color={Paleta.principal} />
               </Pressable>
-            );
-          })}
+            </View>
+
+            {/* Categoría */}
+            <Text className="text-[13px] font-nunito-semi text-principal mb-2">Categoría:</Text>
+            <View className="flex-row flex-wrap justify-between mb-5">
+              {CATEGORIAS.map((cat, i) => {
+                const sel = categoria === i;
+                return (
+                  <Pressable
+                    key={cat}
+                    onPress={() => setCategoria(i)}
+                    style={[
+                      { width: 93, height: 86 },
+                      sombra(sel ? Paleta.verde : Paleta.rojo, sel ? 1 : 0.5, sel ? 6 : 3),
+                    ]}
+                    className="rounded-2xl mb-3 items-center justify-center bg-white active:opacity-70">
+                    <Text
+                      className={`text-[13px] text-center px-1 ${
+                        sel ? 'text-principal font-nunito-semi' : 'text-neutro font-nunito'
+                      }`}>
+                      {cat}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Descripción */}
+            <Text className="text-[13px] font-nunito-semi text-principal mb-1.5">Descripción:</Text>
+            <CampoTexto
+              className="h-24 border-0"
+              style={sombra(Paleta.acento, 0.6, 3)}
+              value={descripcion}
+              onChangeText={setDescripcion}
+              placeholder="Ingresá una descripción detallada del trabajo, de forma que no tengas que responder a tantas dudas de parte de los trabajadores"
+              multiline
+            />
+
+            {/* Dificultad: un solo control segmentado en 3, no tres botones sueltos */}
+            <View
+              style={sombra(Paleta.acento, 0.6, 3)}
+              className="flex-row rounded-lg overflow-hidden bg-white mt-5 mb-5">
+              {DIFICULTADES.map((d, idx) => {
+                const sel = dificultad === d;
+                return (
+                  <View key={d} className="flex-1 flex-row">
+                    {idx > 0 && <View style={{ width: 1, backgroundColor: Paleta.neutro, opacity: 0.3 }} />}
+                    <Pressable
+                      onPress={() => setDificultad(d)}
+                      className={`flex-1 items-center justify-center py-3 active:opacity-70 ${
+                        sel ? 'bg-acento' : 'bg-white'
+                      }`}>
+                      <Text className="text-[13px] font-nunito-semi text-principal">{d}</Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Pago final */}
+            <View style={sombra(Paleta.acento, 0.6, 4)} className="rounded-xl bg-white px-5 py-5 mb-5">
+              <Text className="text-base font-nunito-bold text-principal mb-1">Pago final:</Text>
+              <Text className="text-2xl font-nunito-bold text-principal">
+                {precio !== null ? `$${precio}` : 'Elegí la dificultad'}
+              </Text>
+            </View>
+
+            <Pressable
+              style={sombra(Paleta.acento, 0.6, 3)}
+              className="items-center justify-center bg-white rounded-[10px] py-3.5 active:opacity-70">
+              <Text className="text-base font-nunito-bold text-principal">Configurar medio de pago</Text>
+            </Pressable>
+          </View>
         </View>
-
-        {/* Descripción */}
-        <Text className="text-[13px] font-nunito-semi text-principal mb-1.5">Descripción:</Text>
-        <CampoTexto
-          className="h-24"
-          value={descripcion}
-          onChangeText={setDescripcion}
-          placeholder="Ingresá una descripción detallada del trabajo, de forma que no tengan que responder a tantas dudas de parte de los trabajadores"
-          multiline
-        />
-
-        <View className="flex-row gap-2 mb-5">
-          {DIFICULTADES.map((d) => {
-            const sel = dificultad === d;
-            return (
-              <Pressable
-                key={d}
-                onPress={() => setDificultad(d)}
-                className={`flex-1 rounded-lg py-2.5 items-center border active:opacity-70 ${
-                  sel ? 'bg-acento border-principal' : 'bg-white border-neutro'
-                }`}>
-                <Text
-                  className={`text-[13px] font-nunito-semi ${sel ? 'text-principal' : 'text-neutro'}`}>
-                  {d}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* Información de pago */}
-        <Text className="text-[13px] font-nunito-semi text-principal mb-1.5">Información de pago:</Text>
-        <Text className="text-sm font-nunito text-neutro mb-1">
-          Dada la dificultad que seleccionaste, el pago final sería de:
-        </Text>
-        <Text className="text-2xl font-nunito-bold text-principal mb-3">
-          {precio !== null ? `$${precio}` : 'Elegí la dificultad'}
-        </Text>
-
-        <Pressable className="flex-row items-center justify-between bg-white rounded-[10px] px-4 py-3.5 border border-neutro mb-6 active:opacity-70">
-          <Text className="text-base font-nunito text-neutro">Método de pago</Text>
-          <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
-        </Pressable>
 
         {errorPublicar ? (
           <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorPublicar}</Text>
@@ -344,12 +355,12 @@ export default function OfrecerTrabajoScreen() {
           disabled={publicando}
           className="bg-principal rounded-xl py-4 items-center active:opacity-90">
           {publicando ? (
-            <ActivityIndicator color={Paleta.blanco} />
+            <ActivityIndicator color={Paleta.acento} />
           ) : (
-            <Text className="text-white text-base font-nunito-bold">Ofrecer Trabajo</Text>
+            <Text className="text-acento text-base font-nunito-bold">Ofrecer Trabajo</Text>
           )}
         </Pressable>
-      </PanelDeslizable>
+      </VistaFormulario>
 
       {/* Panel de perfil (se despliega desde el costado) */}
       {perfilAbierto && (

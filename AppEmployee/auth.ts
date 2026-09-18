@@ -86,21 +86,62 @@ async function post(path: string, body: object, token?: string) {
   return leerRespuesta(res);
 }
 
-// Llamadas autenticadas al backend de Nico: agregan solas el token guardado.
-// Las usan `lib/trabajos.ts` y `lib/perfil.ts`.
+// El access token dura poco (JWT_EXPIRES_IN=15m en el backend): pide uno nuevo con el
+// refresh token guardado. Devuelve null si no hay refresh token o si también venció
+// (ahí no queda otra que loguearse de nuevo).
+async function refrescarAccessToken(): Promise<string | null> {
+  const refreshToken = await AsyncStorage.getItem(K.REFRESH);
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetchConTimeout(`${API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return null;
+
+    const { accessToken } = await res.json();
+    await AsyncStorage.setItem(K.ACCESS, accessToken);
+    return accessToken;
+  } catch {
+    return null;
+  }
+}
+
+// Llamadas autenticadas al backend de Nico: agregan solas el token guardado y, si el
+// servidor lo rechaza por vencido (403), refrescan y reintentan una sola vez.
+// Las usan `lib/trabajos.ts`, `lib/perfil.ts` y `lib/ubicacion.ts`.
+
+export async function fetchAutenticado(path: string, init: RequestInit = {}): Promise<Response> {
+  const conToken = (token: string | null) => ({
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  let res = await fetchConTimeout(`${API_URL}${path}`, conToken(await getAccessToken()));
+
+  if (res.status === 403) {
+    const nuevoToken = await refrescarAccessToken();
+    if (nuevoToken) res = await fetchConTimeout(`${API_URL}${path}`, conToken(nuevoToken));
+  }
+
+  return res;
+}
 
 export async function apiGet(path: string) {
-  const token = await getAccessToken();
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetchConTimeout(`${API_URL}${path}`, { headers });
-  return leerRespuesta(res);
+  return leerRespuesta(await fetchAutenticado(path));
 }
 
 export async function apiPost(path: string, body: object = {}) {
-  const token = await getAccessToken();
-  return post(path, body, token ?? undefined);
+  return leerRespuesta(await fetchAutenticado(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
 }
 
 // ── Auth functions ────────────────────────────────────────────────────────────
