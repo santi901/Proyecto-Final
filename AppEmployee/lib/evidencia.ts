@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { File } from 'expo-file-system';
 import { NACHO_API_URL } from '../auth';
 import { fetchConTimeout } from './fetchConTimeout';
 
@@ -17,7 +18,7 @@ export async function subirEvidencia(trabajoId: string, subidoPor: string, uri: 
     const blob = await (await fetch(uri)).blob();
     form.append('foto', blob, nombre);
   } else {
-    form.append('foto', { uri, name: nombre, type: 'image/jpeg' } as any);
+    form.append('foto', new File(uri), nombre);
   }
   form.append('subidoPor', subidoPor);
 

@@ -11,6 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleador, API_URL } from '../auth';
@@ -179,16 +180,8 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-      formData.append('dni', {
-        uri: fotoDni!,
-        name: `dni-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
-      formData.append('selfie', {
-        uri: fotoPerfil!,
-        name: `selfie-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
+      formData.append('dni', new File(fotoDni!), `dni-${form.dni}.jpg`);
+      formData.append('selfie', new File(fotoPerfil!), `selfie-${form.dni}.jpg`);
       formData.append('userId', form.dni);
 
       const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
