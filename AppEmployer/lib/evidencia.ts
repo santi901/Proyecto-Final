@@ -10,12 +10,16 @@ export type Evidencia = {
   s3_key: string;
   subido_por: string;
   creado_en: string;
-  /** Si el backend empieza a devolver una URL (firmada) para ver la foto, se usa esa. */
+  /**
+   * URL firmada para ver la foto (el bucket es privado, así que con `s3_key` sola no alcanza).
+   * La agrega el backend en cada fila y vence a la hora, por eso se relee en cada consulta.
+   * Queda opcional por si el backend responde una fila vieja sin firmar.
+   */
   url?: string;
 };
 
-// Hoy el backend devuelve solo la key del archivo en S3, no una URL para verlo. Si el bucket
-// permite lectura pública, alcanza con definir EXPO_PUBLIC_EVIDENCIA_BASE_URL en el .env.
+// Respaldo por si el backend no manda la URL firmada: si el bucket permitiera lectura
+// pública, alcanza con definir EXPO_PUBLIC_EVIDENCIA_BASE_URL en el .env.
 const EVIDENCIA_BASE_URL = process.env.EXPO_PUBLIC_EVIDENCIA_BASE_URL;
 
 export function urlDeEvidencia(evidencia: Evidencia): string | null {

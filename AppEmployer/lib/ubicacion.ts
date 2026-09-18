@@ -52,6 +52,29 @@ export async function enviarUbicacion(coords: Coordenadas, workerId: string, job
   }
 }
 
+// Última posición conocida del trabajador asignado a un trabajo, para el mapa de seguimiento.
+// GET /api/trabajos/:id/ubicacion-trabajador  (requiere sesión; sólo el empleador dueño)
+//
+// Devuelve `null` en los casos esperados que no son un error para la pantalla: todavía no hay
+// trabajador asignado (400) o el trabajador aún no compartió su GPS (404). Cualquier otra cosa
+// se propaga como error.
+export async function obtenerUbicacionTrabajador(trabajoId: string): Promise<Coordenadas | null> {
+  const token = await getAccessToken();
+  const res = await fetchConTimeout(`${API_URL}/api/trabajos/${trabajoId}/ubicacion-trabajador`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (res.status === 400 || res.status === 404) return null;
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.error ?? `No se pudo obtener la ubicación del trabajador (${res.status}).`);
+  }
+  if (typeof data?.lat !== 'number' || typeof data?.lng !== 'number') return null;
+
+  return { lat: data.lat, lng: data.lng };
+}
+
 // Repite el envío de la ubicación cada 10s mientras la pantalla esté montada (según lo acordado
 // con Santi: el trabajador manda su GPS periódicamente). Asume que el permiso ya fue otorgado.
 // Devuelve una función para cortar el seguimiento (llamarla al desmontar la pantalla).

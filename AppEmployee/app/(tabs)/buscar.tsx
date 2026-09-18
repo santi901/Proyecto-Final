@@ -5,14 +5,11 @@ import {
   Animated,
   Dimensions,
   Linking,
-  PanResponder,
   Pressable,
-  ScrollView,
   Text,
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import {
@@ -27,21 +24,18 @@ import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos
 import MapaUbicacion from '../../components/mapa-ubicacion';
 import ModalSolicitud from '../../components/modal-solicitud';
 import BotonChat from '../../components/boton-chat';
+import PanelDeslizable from '../../components/panel-deslizable';
 import { activarNotificacionesPush } from '../../lib/notificaciones';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 
-const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
-const SHEET_HEIGHT = Math.round(SCREEN_H * 0.82);
-const PEEK = 250; // parte visible del panel cuando está abajo
-const COLLAPSED = SHEET_HEIGHT - PEEK; // translateY cuando está bajado
+const { width: SCREEN_W } = Dimensions.get('window');
 const PANEL_WIDTH = Math.round(SCREEN_W * 0.78);
 
 export default function BuscarTrabajoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
 
   const [usuario, setUsuario] = useState('');
   const [usuarioId, setUsuarioId] = useState('');
@@ -190,32 +184,6 @@ export default function BuscarTrabajoScreen() {
     router.replace('/');
   }
 
-  // ----- Panel deslizable -----
-  const translateY = useRef(new Animated.Value(COLLAPSED)).current;
-  const lastY = useRef(COLLAPSED);
-
-  const snapTo = (to: number) => {
-    Animated.spring(translateY, { toValue: to, useNativeDriver: true, bounciness: 2 }).start();
-    lastY.current = to;
-  };
-
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
-      onPanResponderMove: (_, g) => {
-        let next = lastY.current + g.dy;
-        if (next < 0) next = 0;
-        if (next > COLLAPSED) next = COLLAPSED;
-        translateY.setValue(next);
-      },
-      onPanResponderRelease: (_, g) => {
-        const current = lastY.current + g.dy;
-        if (g.vy < -0.4 || current < COLLAPSED / 2) snapTo(0);
-        else snapTo(COLLAPSED);
-      },
-    })
-  ).current;
-
   // ----- Acceso bloqueado: la identidad no está verificada -----
   if (accesoBloqueado) {
     return (
@@ -314,131 +282,117 @@ export default function BuscarTrabajoScreen() {
         </View>
       </View>
 
-      {/* Panel deslizable */}
-      <Animated.View
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: tabBarHeight,
-          height: SHEET_HEIGHT,
-          backgroundColor: Paleta.blanco,
-          borderTopLeftRadius: 24,
-          borderTopRightRadius: 24,
-          transform: [{ translateY }],
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.12,
-          shadowRadius: 12,
-          elevation: 12,
-        }}>
-        {/* Cabecera arrastrable */}
-        <View {...pan.panHandlers} className="items-center pt-3 pb-2">
-          <View className="w-10 h-1.5 rounded-full bg-neutro mb-1" />
-          <MaterialIcons name="keyboard-arrow-down" size={26} color={Paleta.neutro} />
-        </View>
-
-        <ScrollView
-          className="px-5"
-          contentContainerStyle={{ paddingTop: 8, paddingBottom: 40 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
-          {/* Botón principal: búsqueda automática con solicitud entrante */}
-          <Pressable
-            onPress={() => { setErrorBusqueda(''); setBuscando(b => !b); }}
-            className={`rounded-xl py-4 items-center active:opacity-90 mb-3 ${
-              buscando ? 'bg-white border-[1.5px] border-principal' : 'bg-principal'
-            }`}>
-            {buscando ? (
-              <View className="flex-row items-center gap-2">
-                <ActivityIndicator size="small" color={Paleta.principal} />
-                <Text className="text-principal text-base font-nunito-bold">
-                  Buscando trabajos… (tocá para cancelar)
-                </Text>
+      {/* Panel deslizable sobre el mapa: arranca bajado y nunca tapa el mapa del todo */}
+      <PanelDeslizable
+        proporcion={0.74}
+        asoma={248}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 48 }}
+        cabecera={
+          <View className="px-5 pb-3 border-b border-neutro/40">
+            <View className="flex-row items-center gap-3">
+              <View className="bg-acento rounded-full px-4 py-2">
+                <Text className="text-[15px] font-nunito-bold text-principal">Buscar trabajo</Text>
               </View>
-            ) : (
-              <Text className="text-white text-base font-nunito-bold">Buscar Trabajo</Text>
-            )}
-          </Pressable>
-
-          {errorBusqueda ? (
-            <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorBusqueda}</Text>
-          ) : null}
-
-          {/* Trabajos disponibles */}
-          <View className="flex-row items-center justify-between mt-2 mb-3">
-            <Text className="text-[13px] font-nunito-semi text-principal">Trabajos disponibles</Text>
-            <Pressable onPress={() => cargarTrabajos()} className="p-1 active:opacity-60">
-              <MaterialIcons name="refresh" size={20} color={Paleta.principal} />
-            </Pressable>
+              <MaterialIcons name="favorite-border" size={22} color={Paleta.principal} />
+              <MaterialIcons name="history" size={22} color={Paleta.principal} />
+            </View>
           </View>
-
-          {trabajos === null && !errorTrabajos && (
-            <View className="items-center py-8">
-              <ActivityIndicator color={Paleta.principal} />
-              <Text className="text-neutro text-sm font-nunito mt-3">Buscando trabajos disponibles…</Text>
-            </View>
-          )}
-
-          {!!errorTrabajos && (
-            <View className="items-center py-6">
-              <Text className="text-error text-sm font-nunito text-center mb-3">{errorTrabajos}</Text>
-              <Pressable
-                onPress={() => cargarTrabajos()}
-                className="px-4 py-2 rounded-lg border border-principal active:opacity-70">
-                <Text className="text-principal text-sm font-nunito-semi">Reintentar</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {trabajos !== null && !errorTrabajos && trabajos.length === 0 && (
-            <View className="items-center py-8">
-              <MaterialIcons name="search-off" size={32} color={Paleta.neutro} />
-              <Text className="text-neutro text-sm font-nunito mt-3 text-center">
-                No hay trabajos disponibles por ahora.
+        }>
+        {/* Botón principal: búsqueda automática con solicitud entrante */}
+        <Pressable
+          onPress={() => { setErrorBusqueda(''); setBuscando(b => !b); }}
+          className={`rounded-xl py-4 items-center active:opacity-90 mb-3 ${
+            buscando ? 'bg-white border-[1.5px] border-principal' : 'bg-principal'
+          }`}>
+          {buscando ? (
+            <View className="flex-row items-center gap-2">
+              <ActivityIndicator size="small" color={Paleta.principal} />
+              <Text className="text-principal text-base font-nunito-bold">
+                Buscando trabajos… (tocá para cancelar)
               </Text>
             </View>
+          ) : (
+            <Text className="text-white text-base font-nunito-bold">Buscar Trabajo</Text>
           )}
+        </Pressable>
 
-          {trabajos !== null && trabajos.length > 0 && (
-            <View className="mb-3">
-              {trabajos.map(t => (
-                <Pressable
-                  key={t.id}
-                  onPress={() => { setErrorBusqueda(''); setSolicitud(t); }}
-                  className="bg-fondo-suave rounded-xl border border-neutro p-4 mb-3 active:opacity-70">
-                  <View className="flex-row justify-between items-start mb-1">
-                    <Text className="text-base font-nunito-bold text-principal flex-1 pr-2">{t.titulo}</Text>
-                    <Text className="text-base font-nunito-bold text-principal">${t.precio}</Text>
-                  </View>
-                  <Text className="text-[13px] font-nunito text-neutro mb-1">
-                    {t.categoria}
-                    {t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''}
-                    {coords
-                      ? ` · a ${formatearDistancia(distanciaKm(coords, { lat: t.latitud, lng: t.longitud }))}`
-                      : ''}
-                  </Text>
-                  <Text className="text-sm font-nunito text-neutro" numberOfLines={2}>
-                    {t.descripcion}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
+        {errorBusqueda ? (
+          <Text className="text-error text-[13px] font-nunito text-center mb-3">{errorBusqueda}</Text>
+        ) : null}
 
-          {/* Ayuda + Método de cobro */}
-          <View className="flex-row gap-3 mb-6">
-            <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
-              <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
-            </Pressable>
+        {/* Trabajos disponibles */}
+        <View className="flex-row items-center justify-between mt-2 mb-3">
+          <Text className="text-[13px] font-nunito-semi text-principal">Trabajos disponibles</Text>
+          <Pressable onPress={() => cargarTrabajos()} className="p-1 active:opacity-60">
+            <MaterialIcons name="refresh" size={20} color={Paleta.principal} />
+          </Pressable>
+        </View>
 
-            <Pressable className="flex-1 flex-row items-center justify-between bg-fondo-suave rounded-[10px] px-4 py-3 border border-neutro">
-              <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
-              <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
+        {trabajos === null && !errorTrabajos && (
+          <View className="items-center py-8">
+            <ActivityIndicator color={Paleta.principal} />
+            <Text className="text-neutro text-sm font-nunito mt-3">Buscando trabajos disponibles…</Text>
+          </View>
+        )}
+
+        {!!errorTrabajos && (
+          <View className="items-center py-6">
+            <Text className="text-error text-sm font-nunito text-center mb-3">{errorTrabajos}</Text>
+            <Pressable
+              onPress={() => cargarTrabajos()}
+              className="px-4 py-2 rounded-lg border border-principal active:opacity-70">
+              <Text className="text-principal text-sm font-nunito-semi">Reintentar</Text>
             </Pressable>
           </View>
-        </ScrollView>
-      </Animated.View>
+        )}
+
+        {trabajos !== null && !errorTrabajos && trabajos.length === 0 && (
+          <View className="items-center py-8">
+            <MaterialIcons name="search-off" size={32} color={Paleta.neutro} />
+            <Text className="text-neutro text-sm font-nunito mt-3 text-center">
+              No hay trabajos disponibles por ahora.
+            </Text>
+          </View>
+        )}
+
+        {trabajos !== null && trabajos.length > 0 && (
+          <View className="mb-3">
+            {trabajos.map(t => (
+              <Pressable
+                key={t.id}
+                onPress={() => { setErrorBusqueda(''); setSolicitud(t); }}
+                className="bg-white rounded-xl border border-neutro p-4 mb-3 active:opacity-70">
+                <View className="flex-row justify-between items-start mb-1">
+                  <Text className="text-base font-nunito-bold text-principal flex-1 pr-2">{t.titulo}</Text>
+                  <Text className="text-base font-nunito-bold text-principal">${t.precio}</Text>
+                </View>
+                <Text className="text-[13px] font-nunito text-neutro mb-1">
+                  {t.categoria}
+                  {t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''}
+                  {coords
+                    ? ` · a ${formatearDistancia(distanciaKm(coords, { lat: t.latitud, lng: t.longitud }))}`
+                    : ''}
+                </Text>
+                <Text className="text-sm font-nunito text-neutro" numberOfLines={2}>
+                  {t.descripcion}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* Ayuda + Método de cobro */}
+        <View className="flex-row gap-3 mb-6">
+          <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
+            <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
+          </Pressable>
+
+          <Pressable className="flex-1 flex-row items-center justify-between bg-white rounded-[10px] px-4 py-3 border border-neutro active:opacity-70">
+            <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
+            <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
+          </Pressable>
+        </View>
+      </PanelDeslizable>
 
       {/* Solicitud entrante con timer */}
       <ModalSolicitud

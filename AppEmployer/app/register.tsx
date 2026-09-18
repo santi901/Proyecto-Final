@@ -3,9 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Pressable,
-  ScrollView,
   Text,
-  TextInput,
   View,
   Image,
 } from 'react-native';
@@ -19,6 +17,8 @@ import { registrarEmpleador, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Paleta } from '@/constants/theme';
+import VistaFormulario from '../components/vista-formulario';
+import CampoTexto from '../components/campo-texto';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -265,7 +265,6 @@ export default function RegisterScreen() {
     if (soloNumeros.length <= 4) return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2)}`;
     return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
   }
-  const inputClass = 'bg-white rounded-[10px] px-4 py-3.5 mb-4 text-base text-principal border border-neutro font-nunito';
   async function buscarCoordenadas(direccion: string) {
     if (direccion.length < 5) return;
     try {
@@ -334,15 +333,12 @@ export default function RegisterScreen() {
   }
 
   return (
-    <ScrollView
-      className="flex-1 bg-fondo"
+    <VistaFormulario
       contentContainerStyle={{
         paddingHorizontal: 28,
         paddingTop: insets.top + 24,
         paddingBottom: insets.bottom + 32,
-      }}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}>
+      }}>
       <View className="flex-row items-center gap-2.5 mb-7">
         <View className="w-11 h-11 rounded-xl bg-acento items-center justify-center">
           <Text className="text-2xl font-nunito-bold text-principal">C</Text>
@@ -362,31 +358,31 @@ export default function RegisterScreen() {
             </Text>
           </Pressable>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Ingresá tu mail"
             value={form.email} onChangeText={v => actualizar('email', v)}
             autoCapitalize="none" keyboardType="email-address"
             autoComplete="off" textContentType="none" importantForAutofill="no"
             autoCorrect={false} spellCheck={false} />
 
-          <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Ingresá tu contraseña"
             value={form.password} onChangeText={v => actualizar('password', v)} secureTextEntry />
 
-          <TextInput className={inputClass} placeholder="Volvé a ingresar tu contraseña" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Volvé a ingresar tu contraseña"
             value={form.password2} onChangeText={v => actualizar('password2', v)} secureTextEntry />
 
           <Text className="text-base font-nunito-bold text-principal mt-2 mb-3">Datos personales</Text>
 
-          <TextInput className={inputClass} placeholder="Nombre/s" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Nombre/s"
             value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
 
-          <TextInput className={inputClass} placeholder="Apellido/s" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Apellido/s"
             value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
-          <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Fecha de nacimiento (DD/MM/AAAA)"
             value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', formatearFecha(v))}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="DNI / CUIT"
             value={form.dni} onChangeText={v => actualizar('dni', v)}
             keyboardType="numeric" />
 
@@ -447,11 +443,11 @@ export default function RegisterScreen() {
             Te pedimos solo un poco más de paciencia
           </Text>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu código postal" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Ingresá tu código postal"
             value={form.codigo_postal} onChangeText={v => actualizar('codigo_postal', v)}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="Dirección" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Dirección"
             value={form.direccion}
             onChangeText={v => {
               actualizar('direccion', v);
@@ -489,11 +485,11 @@ export default function RegisterScreen() {
             </View>
           )}
 
-          <TextInput className={inputClass} placeholder="Piso / Departamento (Opcional)" placeholderTextColor={Paleta.neutro}
+          <CampoTexto placeholder="Piso / Departamento (Opcional)"
             value={form.piso_departamento} onChangeText={v => actualizar('piso_departamento', v)} />
 
-          <TextInput className={`${inputClass} h-20 font-nunito`} style={{ textAlignVertical: 'top' }}
-            placeholder="Indicaciones (Opcional)" placeholderTextColor={Paleta.neutro}
+          <CampoTexto className="h-20"
+            placeholder="Indicaciones (Opcional)"
             value={form.indicaciones} onChangeText={v => actualizar('indicaciones', v)}
             multiline numberOfLines={3} />
 
@@ -560,6 +556,6 @@ export default function RegisterScreen() {
           </Pressable>
         </>
       )}
-    </ScrollView>
+    </VistaFormulario>
   );
 }

@@ -17,7 +17,7 @@ export const Paleta = {
   /** Fondo secundario (crema) de las pantallas. */
   fondo: '#FFFDF3',
   /** Variante más clara del fondo, para tarjetas apoyadas sobre el crema. */
-  fondoSuave: '#FFFEF9',
+  fondoSuave: '#FFFEE9',
   blanco: '#FFFFFF',
   /** Estados. No están en la lámina del design system: se eligieron para acompañarla. */
   error: '#E5484D',

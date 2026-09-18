@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { login, tieneSesion, onboardingVisto } from '../auth';
 import { Paleta } from '@/constants/theme';
+import VistaFormulario from '../components/vista-formulario';
+import CampoTexto from '../components/campo-texto';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -109,27 +111,22 @@ export default function WelcomeScreen() {
   }
 
   return (
-    <ScrollView
-      className="flex-1 bg-fondo"
+    <VistaFormulario
       contentContainerStyle={{
         flexGrow: 1,
         paddingHorizontal: 28,
         paddingTop: insets.top + 24,
         paddingBottom: insets.bottom + 24,
         justifyContent: 'center',
-      }}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}>
+      }}>
       <Marca />
 
       <Text className="text-3xl font-nunito-bold text-principal mb-7">
         Iniciá sesión en{'\n'}ChanguitApp Employer
       </Text>
 
-      <TextInput
-        className="bg-white rounded-[10px] px-4 py-3.5 mb-4 text-base font-nunito text-principal border border-neutro"
+      <CampoTexto
         placeholder="Ingresá tu mail"
-        placeholderTextColor={Paleta.neutro}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -140,10 +137,8 @@ export default function WelcomeScreen() {
         autoCorrect={false}
         spellCheck={false}
       />
-      <TextInput
-        className="bg-white rounded-[10px] px-4 py-3.5 mb-4 text-base font-nunito text-principal border border-neutro"
+      <CampoTexto
         placeholder="Ingresá tu contraseña"
-        placeholderTextColor={Paleta.neutro}
         value={pass}
         onChangeText={setPass}
         secureTextEntry
@@ -177,6 +172,6 @@ export default function WelcomeScreen() {
       <Pressable onPress={() => setMostrarLogin(false)}>
         <Text className="text-neutro text-sm font-nunito text-center underline mt-4">Volver</Text>
       </Pressable>
-    </ScrollView>
+    </VistaFormulario>
   );
 }

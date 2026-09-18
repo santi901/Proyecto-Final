@@ -11,7 +11,7 @@ module.exports = {
           acento: "#FFD539",
           neutro: "#909090",
           fondo: "#FFFDF3",
-          "fondo-suave": "#FFFEF9",
+          "fondo-suave": "#FFFEE9",
           error: "#E5484D",
           exito: "#2E9E5B",
         },

@@ -24,6 +24,7 @@ import {
   type Trabajo,
 } from '../lib/trabajos';
 import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
+import { obtenerUbicacionTrabajador, type Coordenadas } from '../lib/ubicacion';
 import { Paleta } from '@/constants/theme';
 
 function fechaCorta(iso: string) {
@@ -92,9 +93,6 @@ function FotoEvidencia({ evidencias }: { evidencias: Evidencia[] | null }) {
 // (`POST /api/trabajos/:id/validar-pin`, que es `soloEmpleado`). Por eso al publicar se
 // guarda en el dispositivo (`guardarPinLocal`) y acá se lee de ahí para dictarlo; el campo
 // de abajo sirve para chequear lo que el trabajador repite — no vuelve a pegarle al backend.
-//
-// El pin del trabajador en el mapa queda sin datos: el backend guarda la ubicación que
-// manda la app del trabajador, pero todavía no expone un endpoint para leerla.
 export default function SeguimientoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -113,6 +111,9 @@ export default function SeguimientoScreen() {
   const [confirmandoFin, setConfirmandoFin] = useState(false);
 
   const [evidencias, setEvidencias] = useState<Evidencia[] | null>(null);
+
+  // Última posición conocida del trabajador, para verlo moverse en el mapa.
+  const [ubicTrabajador, setUbicTrabajador] = useState<Coordenadas | null>(null);
 
   const [puntaje, setPuntaje] = useState(0);
   const [comentario, setComentario] = useState('');
@@ -178,6 +179,32 @@ export default function SeguimientoScreen() {
     [trabajo?.latitud, trabajo?.longitud],
   );
 
+  // ----- Trabajador en camino -----
+  // Mientras el trabajo está asignado o en progreso se consulta cada 10s dónde está el
+  // trabajador (el mismo ritmo al que su app manda el GPS) para moverlo en el mapa.
+  // Si todavía no compartió ubicación el endpoint devuelve `null` y el pin no se dibuja.
+  const estado = trabajo?.estado;
+  const sigueEnCamino = estado === 'asignado' || estado === 'en_progreso';
+
+  useEffect(() => {
+    if (!trabajoId || !sigueEnCamino) return;
+
+    let activo = true;
+
+    async function consultar() {
+      try {
+        const coords = await obtenerUbicacionTrabajador(trabajoId!);
+        if (activo && coords) setUbicTrabajador(coords);
+      } catch (e: any) {
+        console.log('No se pudo obtener la ubicación del trabajador:', e?.message);
+      }
+    }
+
+    consultar();
+    const reloj = setInterval(consultar, 10000);
+    return () => { activo = false; clearInterval(reloj); };
+  }, [trabajoId, sigueEnCamino]);
+
   function volver() {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/ofrecer' as any);
@@ -220,7 +247,15 @@ export default function SeguimientoScreen() {
       await marcarCalificadoLocal(trabajoId!);
       setCalificado(true);
     } catch (e: any) {
-      setErrorCalificacion(e?.message ?? 'No pudimos enviar la calificación.');
+      // 409 = el backend ya tenía una calificación para este trabajo (se calificó desde
+      // otro dispositivo, o se reinstaló la app). No es un error: hay que dejar la
+      // pantalla en "ya calificado" en vez de pedirlo de nuevo para siempre.
+      if (e?.status === 409) {
+        await marcarCalificadoLocal(trabajoId!);
+        setCalificado(true);
+      } else {
+        setErrorCalificacion(e?.message ?? 'No pudimos enviar la calificación.');
+      }
     } finally {
       setCalificando(false);
     }
@@ -365,7 +400,7 @@ export default function SeguimientoScreen() {
     <View className="flex-1 bg-fondo" style={{ paddingTop: insets.top }}>
       {/* Mapa con el lugar del trabajo */}
       <View style={{ height: 260 }}>
-        {lugar ? <MapaSeguimiento empleador={lugar} trabajador={null} /> : null}
+        {lugar ? <MapaSeguimiento empleador={lugar} trabajador={ubicTrabajador} /> : null}
 
         <Pressable
           onPress={volver}

@@ -57,11 +57,20 @@ export async function limpiarSesion() {
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
+/** Error de una llamada al backend, con el status HTTP que lo produjo. */
+export type ErrorDeApi = Error & { status?: number };
+
 // Si el servidor responde algo que no es JSON (ej. la página de error de un túnel caído),
 // se toma como respuesta vacía para mostrar el error genérico en vez de un SyntaxError.
 async function leerRespuesta(res: Response) {
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Error del servidor');
+  if (!res.ok) {
+    // El status viaja con el error: hay pantallas que distinguen un caso esperado
+    // (ej. 409 "ya calificado") de un error real que hay que mostrar.
+    const error: ErrorDeApi = new Error(data.error || 'Error del servidor');
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
