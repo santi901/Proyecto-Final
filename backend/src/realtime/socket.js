@@ -1,0 +1,59 @@
+const { Server } = require('socket.io')
+const supabase = require('../config/supabase')
+const { verificarAccessToken } = require('../utils/jwt')
+const { esParticipanteTrabajo } = require('../utils/participantes')
+
+let io = null
+
+function nombreRoom(trabajoId) {
+  return `trabajo:${trabajoId}`
+}
+
+function configurarSocket(httpServer) {
+  io = new Server(httpServer, { cors: { origin: '*' } })
+
+  io.use((socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token
+      if (!token) throw new Error('Token requerido')
+      socket.usuario = verificarAccessToken(token)
+      next()
+    } catch {
+      next(new Error('No autorizado'))
+    }
+  })
+
+  io.on('connection', (socket) => {
+    socket.on('unirse-trabajo', async ({ trabajoId } = {}) => {
+      if (!trabajoId) return
+
+      const { data: trabajo } = await supabase
+        .from('trabajos').select('id, trabajador_id, empleador_id').eq('id', trabajoId).maybeSingle()
+
+      if (!trabajo) return
+
+      const { id: usuarioId, tipo } = socket.usuario
+      if (await esParticipanteTrabajo(trabajo, usuarioId, tipo)) {
+        socket.join(nombreRoom(trabajoId))
+      }
+    })
+
+    socket.on('salir-trabajo', ({ trabajoId } = {}) => {
+      if (trabajoId) socket.leave(nombreRoom(trabajoId))
+    })
+  })
+
+  return io
+}
+
+function emitirUbicacion(trabajoId, payload) {
+  io?.to(nombreRoom(trabajoId)).emit('ubicacion-trabajador', payload)
+}
+
+function emitirFinTrabajo(trabajoId, payload) {
+  const room = nombreRoom(trabajoId)
+  io?.to(room).emit('trabajo-finalizado', payload)
+  io?.socketsLeave(room)
+}
+
+module.exports = { configurarSocket, emitirUbicacion, emitirFinTrabajo }

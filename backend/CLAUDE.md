@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository context
 
-This `backend/` folder is one part of the `Proyecto-Final` monorepo (ChanguitApp). It is a **separate Node/Express API** from the NestJS project at the monorepo root (`../src`, `../prisma`) — the two are unrelated codebases that happen to share a repo. There are also two Expo apps at the monorepo root, `AppEmployee/` and `AppEmployer/`. Do not mix dependencies or assumptions between this folder and the rest of the repo; treat `backend/` as its own Node project with its own `package.json` and `node_modules`.
+This `backend/` folder is one part of the `Proyecto-Final` monorepo (ChanguitApp). It is a **separate Node/Express API** from the NestJS project at the monorepo root (`../src`, `../prisma`) — mostly unrelated codebases that happen to share a repo, except that `backend/` still makes one server-to-server HTTP call to the NestJS project for push notifications and calificaciones (see `services/notificacionesService.js` and `calificarTrabajo`). There are also two Expo apps at the monorepo root, `AppEmployee/` and `AppEmployer/`. Do not mix dependencies or assumptions between this folder and the rest of the repo; treat `backend/` as its own Node project with its own `package.json` and `node_modules`.
 
 ## Commands
 
@@ -15,22 +15,33 @@ Run from this `backend/` directory:
 
 There is no build step (plain CommonJS, no TypeScript/transpilation), no test suite, and no lint config in this folder.
 
-The server reads config from a `.env` file (not committed) with these keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`.
+The server reads config from a `.env` file (not committed) with these keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, and optionally `REDIS_URL` (defaults to `redis://127.0.0.1:6379`; if Redis isn't reachable the app logs one warning and keeps running).
+
+Schema changes live as plain SQL files in `backend/migrations/`, run by hand against the Supabase project (no migration tooling/CLI wired up).
 
 ## Architecture
 
 Plain layered Express app, no ORM: `server.js` mounts routers → routers apply middleware and dispatch to controllers → controllers call the Supabase JS client directly (`src/config/supabase.js`, using the service-role key, so RLS is bypassed at this layer). There is no models/repository layer — query logic lives inline in each controller.
 
 ```
-server.js                        Express app entrypoint, mounts all routers under /api/*
-src/routes/*.js                  one router per resource, wires middleware + controller fns
-src/controllers/*.js             request handling + all Supabase queries for that resource
-src/middleware/auth.js           autenticar (JWT check), soloEmpleado / soloEmpleador (role gates)
-src/middleware/errorHandler.js   catch-all error handler (last app.use in server.js)
-src/utils/jwt.js                 access/refresh token sign+verify (separate secrets/expiries)
-src/utils/pin.js                 6-digit job-start PIN generation + bcrypt hash/compare
-src/utils/storage.js             uploads a buffer to S3, returns the object key
-src/utils/haversine.js           great-circle distance in km between two lat/lng points
+server.js                             Express app entrypoint; wraps app in http.Server, mounts routers under /api/*,
+                                       wires up socket.io and the reassignment poller
+src/routes/*.js                       one router per resource, wires middleware + controller fns
+src/controllers/*.js                  request handling + all Supabase queries for that resource
+src/services/matchingService.js       worker matching by category/radius/availability/reputation
+src/services/notificacionesService.js push-notification helpers (still call the NestJS project by HTTP)
+src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
+src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
+src/jobs/reasignarTrabajos.js         in-process poller: retries/auto-cancels 'pendiente' trabajos nobody accepted
+src/middleware/auth.js                autenticar (JWT check), soloEmpleado / soloEmpleador (role gates)
+src/middleware/errorHandler.js        catch-all error handler (last app.use in server.js)
+src/utils/jwt.js                      access/refresh token sign+verify (separate secrets/expiries)
+src/utils/pin.js                      6-digit job-start PIN generation + bcrypt hash/compare
+src/utils/participantes.js            esParticipanteTrabajo — shared by the chat and by the socket room-join check
+src/utils/storage.js                  uploads a buffer to S3, returns the object key
+src/utils/haversine.js                great-circle distance in km between two lat/lng points
+src/config/redis.js                   ioredis client, lazy-connects, degrades silently if unreachable
+migrations/*.sql                      schema changes, run by hand against Supabase
 ```
 
 ### Two user types, two profile tables
@@ -50,6 +61,14 @@ JWT access tokens (short-lived, `JWT_EXPIRES_IN`) carry `{ id, email, tipo }` an
 
 State machine driven by the `estado` column on `trabajos`: `pendiente` → (`empleador` creates, gets a one-time 6-digit PIN back in the response — the PIN itself is never stored or re-queryable, only its bcrypt hash + a 24h expiry) → `asignado` (an `empleado` accepts) → `en_progreso` (the assigned `empleado` presents the PIN in person and the `empleador`/dispatcher enters it via `POST /:id/validar-pin`) → `completado`. Every transition re-checks the current `estado` server-side before applying the next one.
 
+`pendiente` also has a `solicitud_expira_en` window (15 min from creation). `src/jobs/reasignarTrabajos.js` polls every 5 min for `pendiente` trabajos past that window: it extends the window and re-notifies candidates up to `MAX_REINTENTOS` (3) times, then auto-cancels (`estado='cancelado'`, `cancelado_por='sistema'`) if nobody ever accepted.
+
+`completado` requires both parties to confirm: `POST /:id/completar` (same endpoint both apps already call) sets `confirmado_empleado_en`/`confirmado_empleador_en` for whichever side calls it, and only flips `estado` to `completado` once both are set.
+
+`cancelado` is reachable from `pendiente`/`asignado` via `POST /:id/cancelar` (empleador-owner only) or automatically by the reassignment poller above; it's terminal like `completado`, not reachable once `en_progreso`.
+
+`GET /:id/candidatos` (empleador-owner only) exposes `matchingService.buscarTrabajadoresDisponibles` directly.
+
 ### Identity verification (`verificacionController.js`)
 
 `POST /api/verificacion/comparar-caras` takes two multipart images (`dni`, `selfie`) and runs Rekognition `CompareFacesCommand` between them, with a match declared only above 90% similarity (note this is stricter than the 80% `SimilarityThreshold` passed to the AWS call itself, which just controls what AWS returns at all). Both images are uploaded to S3 via `storage.guardarImagen` regardless of match outcome.
@@ -58,7 +77,19 @@ There used to also be a Textract `DetectDocumentTextCommand` check on the DNI ph
 
 ### Ubicación / distance-cost estimation
 
-`ubicacionController.js` geocodes free-text addresses via the public Nominatim (OpenStreetMap) API — no API key, but requires a `User-Agent` header — then uses `haversine.calcularDistanciaKm` plus fixed constants (`PRECIO_NAFTA_ARS`, `RENDIMIENTO_KM_POR_LITRO`) to estimate fuel cost in ARS. `actualizarUbicacion` additionally upserts live coordinates into `worker_locations` and, if a `jobId` is given, returns remaining distance/cost to that job's stored `lat`/`lng`.
+`ubicacionController.js` geocodes free-text addresses via the public Nominatim (OpenStreetMap) API — no API key, but requires a `User-Agent` header — then uses `haversine.calcularDistanciaKm` plus fixed constants (`PRECIO_NAFTA_ARS`, `RENDIMIENTO_KM_POR_LITRO`) to estimate fuel cost in ARS. `actualizarUbicacion` additionally upserts live coordinates into `worker_locations` (persistent) **and** writes an ephemeral copy to Redis via `ubicacionCacheService` (120s TTL); if a `jobId` is given, it returns remaining distance/cost to that job's stored `lat`/`lng` **and**, when the job is `asignado`/`en_progreso`, emits the coordinates over the `trabajo:{jobId}` WebSocket room via `emitirUbicacion`. `GET /api/ubicacion/:workerId` reads the Redis cache back as a fallback for clients not connected over WebSocket.
+
+### Matching (`src/services/matchingService.js`)
+
+Finds `empleados` whose `categorias` include the job's `categoria`, within each candidate's own `radio_busqueda` (or an overridden `radioKm`) of the job's own `lat`/`lng`, excluding workers currently tied to a job in `asignado`/`en_progreso`, sorted by `reputacion` desc then distance asc. Used by `notificarNuevoTrabajo` (on creation and on every reassignment retry) and by `GET /api/trabajos/:id/candidatos`.
+
+### Realtime (`src/realtime/socket.js`)
+
+`socket.io` (already a dependency, previously unused) is attached to the same `http.Server` as Express in `server.js`. Connections authenticate with the same JWT access token as the REST API (`socket.handshake.auth.token`). Clients join a per-trabajo room by emitting `unirse-trabajo { trabajoId }`, gated by `esParticipanteTrabajo`. `ubicacionController.actualizarUbicacion` emits `ubicacion-trabajador` into that room while the job is active; `completarTrabajo` (once both parties confirmed) and `cancelarTrabajo` emit `trabajo-finalizado` and force everyone out of the room.
+
+### Redis (`src/config/redis.js`)
+
+`ioredis`, `lazyConnect: true`, reads `REDIS_URL`. Every call site wraps Redis calls in try/catch and only logs — if Redis isn't running, the app still starts and everything else keeps working, just without the ephemeral location cache.
 
 ## Conventions
 
