@@ -52,6 +52,8 @@ export default function TrabajoEnCursoScreen() {
 
   const [confirmandoFin, setConfirmandoFin] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  /** Ya confirmé la finalización, pero el empleador todavía no. */
+  const [esperandoOtraParte, setEsperandoOtraParte] = useState(false);
 
   const [ultimaPos, setUltimaPos] = useState<Coordenadas | null>(null);
 
@@ -160,9 +162,17 @@ export default function TrabajoEnCursoScreen() {
         setSubiendoFoto(false);
       }
 
-      const { duracionSegundos } = await completarTrabajo(trabajoId!);
-      setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos } : t));
-      completadoRef.current = true;
+      // El backend cierra el trabajo sólo cuando confirmaron las dos partes. Si todavía
+      // falta el empleador, el trabajo sigue 'en_progreso' y hay que decirlo, no dar por
+      // terminado algo que no terminó.
+      const resultado = await completarTrabajo(trabajoId!);
+      if (resultado.estado === 'completado') {
+        setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos: resultado.duracionSegundos ?? null } : t));
+        completadoRef.current = true;
+        setEsperandoOtraParte(false);
+      } else {
+        setEsperandoOtraParte(true);
+      }
       setConfirmandoFin(false);
     } catch (e: any) {
       setSubiendoFoto(false);
@@ -373,12 +383,23 @@ export default function TrabajoEnCursoScreen() {
             <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text>
           ) : null}
 
-          {confirmandoFin ? (
+          {esperandoOtraParte ? (
+            <View className="bg-fondo-suave border border-neutro rounded-xl p-4 items-center">
+              <MaterialIcons name="hourglass-top" size={30} color={Paleta.principal} />
+              <Text className="text-principal text-base font-nunito-bold text-center mt-2 mb-1">
+                Esperando al empleador
+              </Text>
+              <Text className="text-neutro text-sm font-nunito text-center leading-5">
+                Ya marcaste el trabajo como terminado. Cuando el empleador lo confirme, se cierra
+                y se libera el pago de ${trabajo.precio}.
+              </Text>
+            </View>
+          ) : confirmandoFin ? (
             <View className="bg-white border border-neutro rounded-xl p-4">
               <Text className="text-principal text-base font-nunito-bold mb-1">¿Terminaste el trabajo?</Text>
               <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
-                Se sube la foto como evidencia y el trabajo queda completado. Se libera el pago
-                de ${trabajo.precio}.
+                Se sube la foto como evidencia y queda esperando que el empleador confirme.
+                Cuando confirme se cierra el trabajo y se libera el pago de ${trabajo.precio}.
               </Text>
 
               <Pressable

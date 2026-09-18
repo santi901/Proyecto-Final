@@ -16,6 +16,7 @@ import CalificacionEstrellas from '../components/calificacion-estrellas';
 import {
   obtenerTrabajo,
   completarTrabajo,
+  cancelarTrabajo,
   obtenerPinLocal,
   calificarTrabajo,
   marcarCalificadoLocal,
@@ -109,6 +110,11 @@ export default function SeguimientoScreen() {
 
   const [confirmando, setConfirmando] = useState(false);
   const [confirmandoFin, setConfirmandoFin] = useState(false);
+  /** Ya confirmé la finalización, pero el trabajador todavía no. */
+  const [esperandoOtraParte, setEsperandoOtraParte] = useState(false);
+
+  const [confirmandoCancelar, setConfirmandoCancelar] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
 
   const [evidencias, setEvidencias] = useState<Evidencia[] | null>(null);
 
@@ -225,15 +231,40 @@ export default function SeguimientoScreen() {
     setError('');
     setConfirmando(true);
     try {
-      const { duracionSegundos } = await completarTrabajo(trabajoId!);
-      setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos } : t));
-      completadoRef.current = true;
+      // El backend cierra el trabajo sólo cuando confirmaron las dos partes. Si el
+      // trabajador todavía no confirmó, el trabajo sigue 'en_progreso': hay que decirlo
+      // en vez de dar por cerrado algo que no cerró.
+      const resultado = await completarTrabajo(trabajoId!);
+      if (resultado.estado === 'completado') {
+        setTrabajo(t => (t ? { ...t, estado: 'completado', duracionSegundos: resultado.duracionSegundos ?? null } : t));
+        completadoRef.current = true;
+        setEsperandoOtraParte(false);
+      } else {
+        setEsperandoOtraParte(true);
+      }
       setConfirmandoFin(false);
       cargarEvidencia();
     } catch (e: any) {
       setError(e?.message ?? 'No pudimos confirmar la finalización.');
     } finally {
       setConfirmando(false);
+    }
+  }
+
+  // Cancelar sólo se puede antes de que el trabajo arranque ('pendiente' o 'asignado');
+  // el backend lo rechaza una vez que está 'en_progreso'.
+  async function handleCancelar() {
+    setError('');
+    setCancelando(true);
+    try {
+      await cancelarTrabajo(trabajoId!);
+      setTrabajo(t => (t ? { ...t, estado: 'cancelado' } : t));
+      completadoRef.current = true; // terminal: no hace falta seguir refrescando
+      setConfirmandoCancelar(false);
+    } catch (e: any) {
+      setError(e?.message ?? 'No pudimos cancelar el trabajo.');
+    } finally {
+      setCancelando(false);
     }
   }
 
@@ -391,6 +422,9 @@ export default function SeguimientoScreen() {
   }
 
   const enProgreso = trabajo.estado === 'en_progreso';
+  const cancelado = trabajo.estado === 'cancelado';
+  // El backend sólo deja cancelar antes de que el trabajo arranque.
+  const sePuedeCancelar = trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
   const solicitudVencida =
     trabajo.estado === 'pendiente' &&
     !!trabajo.solicitud_expira_en &&
@@ -417,11 +451,17 @@ export default function SeguimientoScreen() {
         <View className="flex-row items-center gap-2 mb-4">
           <View
             className={`w-2.5 h-2.5 rounded-full ${
-              solicitudVencida ? 'bg-error' : trabajo.estado === 'pendiente' ? 'bg-neutro' : 'bg-exito'
+              cancelado || solicitudVencida
+                ? 'bg-error'
+                : trabajo.estado === 'pendiente'
+                ? 'bg-neutro'
+                : 'bg-exito'
             }`}
           />
           <Text className="text-neutro text-xs font-nunito-semi uppercase tracking-wider">
-            {solicitudVencida
+            {cancelado
+              ? 'Trabajo cancelado'
+              : solicitudVencida
               ? 'Ningún trabajador lo tomó a tiempo'
               : trabajo.estado === 'pendiente'
               ? 'Esperando que un trabajador lo tome'
@@ -522,13 +562,25 @@ export default function SeguimientoScreen() {
               <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text>
             ) : null}
 
-            {confirmandoFin ? (
+            {esperandoOtraParte ? (
+              <View className="bg-fondo-suave border border-neutro rounded-xl p-4 items-center">
+                <MaterialIcons name="hourglass-top" size={30} color={Paleta.principal} />
+                <Text className="text-principal text-base font-nunito-bold text-center mt-2 mb-1">
+                  Esperando al trabajador
+                </Text>
+                <Text className="text-neutro text-sm font-nunito text-center leading-5">
+                  Ya confirmaste la finalización. El trabajo se cierra y se libera el pago de $
+                  {trabajo.precio} cuando el trabajador también lo marque como terminado.
+                </Text>
+              </View>
+            ) : confirmandoFin ? (
               <View className="bg-white border border-neutro rounded-xl p-4">
                 <Text className="text-principal text-base font-nunito-bold mb-1">
                   ¿Confirmás que el trabajo está terminado?
                 </Text>
                 <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
-                  Al confirmar se libera el pago de ${trabajo.precio} al trabajador. No se puede deshacer.
+                  Hace falta que las dos partes confirmen. Cuando el trabajador también lo marque,
+                  se libera el pago de ${trabajo.precio}. No se puede deshacer.
                 </Text>
 
                 <Pressable
@@ -555,6 +607,53 @@ export default function SeguimientoScreen() {
               </Pressable>
             )}
           </>
+        ) : null}
+
+        {/* Cancelar: sólo antes de que el trabajo arranque */}
+        {sePuedeCancelar ? (
+          confirmandoCancelar ? (
+            <View className="bg-white border border-error rounded-xl p-4 mt-6">
+              <Text className="text-principal text-base font-nunito-bold mb-1">
+                ¿Cancelar este trabajo?
+              </Text>
+              <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
+                Se da de baja la publicación y, si ya había un trabajador asignado, se le avisa.
+                No se puede deshacer.
+              </Text>
+
+              <Pressable
+                onPress={handleCancelar}
+                disabled={cancelando}
+                className="bg-error rounded-xl py-4 items-center active:opacity-90 mb-2.5">
+                <Text className="text-white text-base font-nunito-bold">
+                  {cancelando ? 'Cancelando…' : 'Sí, cancelar el trabajo'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setConfirmandoCancelar(false)}
+                disabled={cancelando}
+                className="bg-white rounded-xl py-4 items-center border-[1.5px] border-principal active:opacity-70">
+                <Text className="text-principal text-base font-nunito-bold">Volver</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => { setError(''); setConfirmandoCancelar(true); }}
+              className="mt-6 py-3 items-center active:opacity-70">
+              <Text className="text-error text-sm font-nunito-semi underline">Cancelar trabajo</Text>
+            </Pressable>
+          )
+        ) : null}
+
+        {cancelado ? (
+          <View className="flex-row items-start bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mt-2">
+            <MaterialIcons name="cancel" size={18} color={Paleta.error} />
+            <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
+              Este trabajo está cancelado. Si todavía lo necesitás, publicalo de nuevo desde
+              &ldquo;Ofrecer trabajo&rdquo;.
+            </Text>
+          </View>
         ) : null}
       </ScrollView>
     </View>

@@ -11,6 +11,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
   asignado: 'Asignado',
   en_progreso: 'En progreso',
   completado: 'Completado',
+  cancelado: 'Cancelado',
 };
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
@@ -19,6 +20,7 @@ const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
   completado: { fondo: 'bg-principal', texto: 'text-white' },
+  cancelado: { fondo: 'bg-error', texto: 'text-white' },
 };
 
 const PROXIMO_PASO: Partial<Record<EstadoTrabajo, string>> = {

@@ -4,7 +4,9 @@ import { apiGet, apiPost } from '../auth';
 // Flujo de un trabajo del lado del empleador, contra el backend de Nico
 // (`backend/src/routes/trabajos.js`): publicación → PIN → seguimiento → finalización.
 
-export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado';
+// 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
+// reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
+export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type Trabajo = {
   id: string;
@@ -50,8 +52,25 @@ export async function obtenerTrabajo(id: string): Promise<{ trabajo: Trabajo }> 
 }
 
 // POST /api/trabajos/:id/completar
-export async function completarTrabajo(id: string): Promise<{ message: string; duracionSegundos: number | null }> {
+/**
+ * Completar necesita que confirmen **las dos partes**: la primera llamada deja el trabajo
+ * en `en_progreso` con `esperandoConfirmacion: true`, y recién la segunda lo pasa a
+ * `completado`. Hay que mirar `estado`: que la llamada no falle no significa que cerró.
+ */
+export type ResultadoCompletar = {
+  message: string;
+  estado: EstadoTrabajo;
+  esperandoConfirmacion?: boolean;
+  duracionSegundos?: number | null;
+};
+
+export async function completarTrabajo(id: string): Promise<ResultadoCompletar> {
   return apiPost(`/api/trabajos/${id}/completar`);
+}
+
+/** Cancela un trabajo `pendiente` o `asignado`. Solo el empleador dueño. */
+export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
 }
 
 // El PIN solo viaja una vez en la respuesta de crearTrabajo (el backend guarda el hash,

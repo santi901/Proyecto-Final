@@ -11,6 +11,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
   asignado: 'Asignado',
   en_progreso: 'En progreso',
   completado: 'Completado',
+  cancelado: 'Cancelado',
 };
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
@@ -19,6 +20,7 @@ const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
   completado: { fondo: 'bg-principal', texto: 'text-white' },
+  cancelado: { fondo: 'bg-error', texto: 'text-white' },
 };
 
 // El PIN solo tiene sentido mostrarlo mientras el trabajo todavía no arrancó
@@ -32,6 +34,8 @@ function proximoPaso(t: Trabajo): string {
   }
   if (t.estado === 'asignado') return 'El trabajador va en camino. Dictale el PIN cuando llegue.';
   if (t.estado === 'en_progreso') return 'Trabajo en curso.';
+  // El backend cancela solo los trabajos que nadie acepta después de 3 reintentos.
+  if (t.estado === 'cancelado') return 'Este trabajo se canceló. Podés volver a publicarlo.';
   return 'Tocá para ver la foto y calificar al trabajador.';
 }
 
