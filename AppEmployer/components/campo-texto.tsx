@@ -5,7 +5,7 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 import { useAvisarFoco } from './foco-campos';
 
 /**
@@ -52,8 +52,8 @@ export default function CampoTexto({
         onFocus={alEnfocar}
         multiline={multiline}
         placeholderTextColor={Paleta.neutro}
-        className={`bg-white rounded-[10px] px-4 py-3.5 text-base text-principal border border-neutro font-nunito ${className}`}
-        style={[multiline ? { textAlignVertical: 'top' } : null, style]}
+        className={`bg-white rounded-[10px] px-4 py-3.5 text-base text-principal font-nunito ${className}`}
+        style={[multiline ? { textAlignVertical: 'top' } : null, sombra(Paleta.acento), style]}
         {...props}
       />
     </View>

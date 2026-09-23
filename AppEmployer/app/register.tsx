@@ -17,7 +17,7 @@ import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleador, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
 import MapaHtml from '../components/mapa-html';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 import VistaFormulario from '../components/vista-formulario';
 import CampoTexto from '../components/campo-texto';
 
@@ -317,7 +317,7 @@ export default function RegisterScreen() {
             <Pressable
               onPress={() => { setVerifEstado(null); setError(''); }}
               className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
-              <Text className="text-white text-base font-nunito-bold">Reintentar</Text>
+              <Text className="text-acento text-base font-nunito-bold">Reintentar</Text>
             </Pressable>
           </>
         )}
@@ -384,7 +384,7 @@ export default function RegisterScreen() {
           <Pressable
             className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={irAlPaso2}>
-            <Text className="text-white text-base font-nunito-bold">Siguiente</Text>
+            <Text className="text-acento text-base font-nunito-bold">Siguiente</Text>
           </Pressable>
         </>
       ) : paso === 2 ? (
@@ -422,7 +422,7 @@ export default function RegisterScreen() {
           <Pressable
             className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90"
             onPress={() => setPaso(3)}>
-            <Text className="text-white text-base font-nunito-bold">Continuar</Text>
+            <Text className="text-acento text-base font-nunito-bold">Continuar</Text>
           </Pressable>
 
           <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
@@ -485,7 +485,8 @@ export default function RegisterScreen() {
 
           <Pressable
             onPress={() => seleccionarFoto('perfil')}
-            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            style={sombra(Paleta.acento)}
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 active:opacity-70">
             <View className="w-14 h-14 rounded-full bg-fondo-suave items-center justify-center overflow-hidden">
               {fotoPerfil ? (
                 <Image source={{ uri: fotoPerfil }} className="w-14 h-14" />
@@ -502,7 +503,8 @@ export default function RegisterScreen() {
 
           <Pressable
             onPress={() => seleccionarFoto('dni')}
-            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            style={sombra(Paleta.acento)}
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 active:opacity-70">
             <View className="w-14 h-14 rounded-lg bg-fondo-suave items-center justify-center overflow-hidden">
               {fotoDni ? (
                 <Image source={{ uri: fotoDni }} className="w-14 h-14" />
@@ -530,7 +532,7 @@ export default function RegisterScreen() {
             className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={handleRegistro}
             disabled={cargando}>
-            <Text className="text-white text-base font-nunito-bold">
+            <Text className="text-acento text-base font-nunito-bold">
               {cargando ? 'Creando cuenta...' : 'Crear cuenta'}
             </Text>
           </Pressable>

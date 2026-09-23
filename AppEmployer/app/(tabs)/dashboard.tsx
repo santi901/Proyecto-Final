@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
+import { Paleta, sombra } from '@/constants/theme';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -48,13 +49,13 @@ export default function DashboardScreen() {
 
       <Text className="text-sm font-nunito-bold text-neutro mb-3 uppercase">Acciones rapidas</Text>
 
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+      <Pressable style={sombra(Paleta.acento)} className="bg-white rounded-lg p-4 mb-2" onPress={() => {}}>
         <Text className="text-base font-nunito text-principal">Cargar turno</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+      <Pressable style={sombra(Paleta.acento)} className="bg-white rounded-lg p-4 mb-2" onPress={() => {}}>
         <Text className="text-base font-nunito text-principal">Registrar novedad</Text>
       </Pressable>
-      <Pressable className="bg-white rounded-lg p-4 mb-2 border border-neutro" onPress={() => {}}>
+      <Pressable style={sombra(Paleta.acento)} className="bg-white rounded-lg p-4 mb-2" onPress={() => {}}>
         <Text className="text-base font-nunito text-principal">Ver liquidaciones</Text>
       </Pressable>
 

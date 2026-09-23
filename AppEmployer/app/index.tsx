@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { login, tieneSesion, onboardingVisto } from '../auth';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 import VistaFormulario from '../components/vista-formulario';
 import CampoTexto from '../components/campo-texto';
 
@@ -92,11 +92,12 @@ export default function WelcomeScreen() {
             <Pressable
               className="bg-principal rounded-xl py-4 items-center active:opacity-90"
               onPress={() => router.push('/register')}>
-              <Text className="text-white text-base font-nunito-bold">Creá una cuenta</Text>
+              <Text className="text-acento text-base font-nunito-bold">Creá una cuenta</Text>
             </Pressable>
 
             <Pressable
-              className="bg-white rounded-xl py-4 items-center border-[1.5px] border-principal active:opacity-70"
+              style={sombra(Paleta.principal, 0.75)}
+              className="bg-white rounded-xl py-4 items-center active:opacity-70"
               onPress={() => setMostrarLogin(true)}>
               <Text className="text-principal text-base font-nunito-bold">Iniciá sesión</Text>
             </Pressable>
@@ -149,7 +150,7 @@ export default function WelcomeScreen() {
       <Pressable
         className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
         onPress={handleLogin}>
-        <Text className="text-white text-base font-nunito-bold">Iniciar sesión</Text>
+        <Text className="text-acento text-base font-nunito-bold">Iniciar sesión</Text>
       </Pressable>
 
       <Pressable onPress={() => router.push('/register')} className="mt-5">

@@ -36,7 +36,7 @@ export default function BotonChat() {
     <Pressable
       onPress={abrirChat}
       disabled={buscando}
-      style={sombra(Paleta.neutro, 0.4, 3)}
+      style={sombra(Paleta.neutro, 0.55, 3)}
       className="w-11 h-11 rounded-full bg-white items-center justify-center active:opacity-70">
       {buscando ? (
         <ActivityIndicator size="small" color={Paleta.principal} />

@@ -29,16 +29,26 @@ export const Paleta = {
 
 /**
  * Sombra suave centrada que reemplaza los bordes de la lámina: en Figma el "spread" es
- * 0 en casi todos los casos (acá, `radio` chico). La única excepción documentada es el
- * selector de categoría seleccionado, con spread 2 — para eso se sube `radio`.
+ * 0 en casi todos los casos (acá, `radio` chico y fino). La única excepción documentada
+ * es el selector de categoría seleccionado, con spread 2 — para eso se sube `radio`.
+ *
+ * `elevation` (la sombra de Android) queda fija y chica: si la atamos a `radio`, un
+ * `radio` fino como el que pide el design system redondea a 0 y Android se queda sin
+ * sombra directamente.
+ *
+ * IMPORTANTE: en React Native la sombra se recorta si el mismo View tiene
+ * `overflow: hidden` (para redondear las esquinas de contenido que la desborda, por
+ * ejemplo). Si hace falta clipear contenido Y tener sombra, hay que separarlo en dos
+ * Views: uno de afuera con esta sombra (sin overflow-hidden) y uno de adentro con
+ * `overflow-hidden` + el mismo `borderRadius` para el clip.
  */
-export function sombra(color: string, opacidad = 0.7, radio = 3) {
+export function sombra(color: string, opacidad = 0.65, radio = 1.5) {
   return {
     shadowColor: color,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: opacidad,
     shadowRadius: radio,
-    elevation: radio,
+    elevation: 2,
   } as const;
 }
 

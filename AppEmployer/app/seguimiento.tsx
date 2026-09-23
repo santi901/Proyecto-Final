@@ -26,7 +26,7 @@ import {
 } from '../lib/trabajos';
 import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
 import { obtenerUbicacionTrabajador, type Coordenadas } from '../lib/ubicacion';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 
 function fechaCorta(iso: string) {
   const d = new Date(iso);
@@ -314,7 +314,7 @@ export default function SeguimientoScreen() {
         <Pressable
           onPress={volver}
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
-          <Text className="text-white text-base font-nunito-bold">Volver</Text>
+          <Text className="text-acento text-base font-nunito-bold">Volver</Text>
         </Pressable>
       </View>
     );
@@ -351,12 +351,14 @@ export default function SeguimientoScreen() {
 
         {/* Evidencia */}
         <Text className="text-principal text-base font-nunito-bold mb-2">Foto del trabajo terminado</Text>
-        <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-6">
-          <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+        <View style={sombra(Paleta.acento)} className="rounded-xl mb-6">
+          <View className="bg-white rounded-xl overflow-hidden">
+            <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+          </View>
         </View>
 
         {/* Calificación del trabajador */}
-        <View className="bg-white border border-neutro rounded-xl p-4 mb-6">
+        <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4 mb-6">
           {calificado ? (
             <View className="items-center py-2">
               <MaterialIcons name="star" size={32} color={Paleta.acento} />
@@ -378,8 +380,8 @@ export default function SeguimientoScreen() {
               />
 
               <TextInput
-                className="bg-fondo-suave rounded-[10px] px-4 py-3 mt-4 mb-3 text-[15px] font-nunito text-principal border border-neutro h-20"
-                style={{ textAlignVertical: 'top' }}
+                className="bg-fondo-suave rounded-[10px] px-4 py-3 mt-4 mb-3 text-[15px] font-nunito text-principal h-20"
+                style={[{ textAlignVertical: 'top' }, sombra(Paleta.acento)]}
                 placeholder="Comentario (opcional)"
                 placeholderTextColor={Paleta.neutro}
                 value={comentario}
@@ -399,7 +401,7 @@ export default function SeguimientoScreen() {
                 {calificando ? (
                   <ActivityIndicator color={Paleta.blanco} />
                 ) : (
-                  <Text className="text-white text-base font-nunito-bold">Enviar calificación</Text>
+                  <Text className="text-acento text-base font-nunito-bold">Enviar calificación</Text>
                 )}
               </Pressable>
             </>
@@ -408,14 +410,15 @@ export default function SeguimientoScreen() {
 
         <Pressable
           onPress={abrirChat}
-          className="bg-white rounded-xl py-3.5 items-center border-[1.5px] border-principal active:opacity-70 mb-3">
+          style={sombra(Paleta.principal, 0.75)}
+          className="bg-white rounded-xl py-3.5 items-center active:opacity-70 mb-3">
           <Text className="text-principal text-base font-nunito-bold">Ver el chat</Text>
         </Pressable>
 
         <Pressable
           onPress={() => router.replace('/(tabs)/ofrecer' as any)}
           className="bg-principal rounded-xl py-4 items-center active:opacity-90">
-          <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
+          <Text className="text-acento text-base font-nunito-bold">Volver al inicio</Text>
         </Pressable>
       </ScrollView>
     );
@@ -438,7 +441,8 @@ export default function SeguimientoScreen() {
 
         <Pressable
           onPress={volver}
-          className="absolute top-3 left-4 w-10 h-10 rounded-full bg-white items-center justify-center border border-neutro active:opacity-70">
+          style={sombra(Paleta.neutro)}
+          className="absolute top-3 left-4 w-10 h-10 rounded-full bg-white items-center justify-center active:opacity-70">
           <MaterialIcons name="arrow-back" size={22} color={Paleta.principal} />
         </Pressable>
       </View>
@@ -475,7 +479,7 @@ export default function SeguimientoScreen() {
         <Text className="text-neutro text-sm font-nunito mb-5">{trabajo.descripcion}</Text>
 
         {solicitudVencida ? (
-          <View className="flex-row items-center bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mb-5">
+          <View style={sombra(Paleta.neutro)} className="flex-row items-center bg-fondo-suave rounded-xl px-4 py-3 mb-5">
             <MaterialIcons name="timer-off" size={18} color={Paleta.neutro} />
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
               La solicitud expiró sin que nadie la acepte. Podés publicar el trabajo de nuevo.
@@ -487,7 +491,8 @@ export default function SeguimientoScreen() {
         {trabajo.estado === 'asignado' || enProgreso ? (
           <Pressable
             onPress={abrirChat}
-            className="flex-row items-center justify-center bg-white border-[1.5px] border-principal rounded-xl py-3 mb-5 active:opacity-70">
+            style={sombra(Paleta.principal, 0.75)}
+            className="flex-row items-center justify-center bg-white rounded-xl py-3 mb-5 active:opacity-70">
             <MaterialIcons name="chat-bubble-outline" size={18} color={Paleta.principal} />
             <Text className="text-principal text-sm font-nunito-bold ml-2">Chat con el trabajador</Text>
           </Pressable>
@@ -495,7 +500,7 @@ export default function SeguimientoScreen() {
 
         {/* PIN de verificación */}
         {!enProgreso && !solicitudVencida ? (
-          <View className="bg-white border border-neutro rounded-xl p-4 mb-5">
+          <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4 mb-5">
             <Text className="text-neutro text-xs font-nunito mb-1">
               Código PIN — dictáselo al trabajador cuando llegue
             </Text>
@@ -519,7 +524,8 @@ export default function SeguimientoScreen() {
                       Si querés chequear que te lo repita bien, ingresalo acá.
                     </Text>
                     <TextInput
-                      className="bg-fondo-suave rounded-[10px] px-4 py-3 mb-2 text-lg font-nunito-bold text-principal border border-neutro text-center tracking-[6px]"
+                      className="bg-fondo-suave rounded-[10px] px-4 py-3 mb-2 text-lg font-nunito-bold text-principal text-center tracking-[6px]"
+                      style={sombra(Paleta.acento)}
                       placeholder="000000"
                       placeholderTextColor={Paleta.neutro}
                       value={pinIngresado}
@@ -532,7 +538,8 @@ export default function SeguimientoScreen() {
                     ) : null}
                     <Pressable
                       onPress={verificarPin}
-                      className="bg-white rounded-xl py-3 items-center border-[1.5px] border-principal active:opacity-70">
+                      style={sombra(Paleta.principal, 0.75)}
+                      className="bg-white rounded-xl py-3 items-center active:opacity-70">
                       <Text className="text-principal text-sm font-nunito-bold">Verificar código</Text>
                     </Pressable>
                   </>
@@ -554,8 +561,10 @@ export default function SeguimientoScreen() {
               Es la evidencia que sube el trabajador al marcar el trabajo como finalizado.
             </Text>
 
-            <View className="bg-white border border-neutro rounded-xl overflow-hidden mb-5">
-              <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+            <View style={sombra(Paleta.acento)} className="rounded-xl mb-5">
+              <View className="bg-white rounded-xl overflow-hidden">
+                <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+              </View>
             </View>
 
             {error ? (
@@ -563,7 +572,7 @@ export default function SeguimientoScreen() {
             ) : null}
 
             {esperandoOtraParte ? (
-              <View className="bg-fondo-suave border border-neutro rounded-xl p-4 items-center">
+              <View style={sombra(Paleta.neutro)} className="bg-fondo-suave rounded-xl p-4 items-center">
                 <MaterialIcons name="hourglass-top" size={30} color={Paleta.principal} />
                 <Text className="text-principal text-base font-nunito-bold text-center mt-2 mb-1">
                   Esperando al trabajador
@@ -574,7 +583,7 @@ export default function SeguimientoScreen() {
                 </Text>
               </View>
             ) : confirmandoFin ? (
-              <View className="bg-white border border-neutro rounded-xl p-4">
+              <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4">
                 <Text className="text-principal text-base font-nunito-bold mb-1">
                   ¿Confirmás que el trabajo está terminado?
                 </Text>
@@ -587,7 +596,7 @@ export default function SeguimientoScreen() {
                   onPress={handleConfirmarFin}
                   disabled={confirmando}
                   className="bg-principal rounded-xl py-4 items-center active:opacity-90 mb-2.5">
-                  <Text className="text-white text-base font-nunito-bold">
+                  <Text className="text-acento text-base font-nunito-bold">
                     {confirmando ? 'Confirmando…' : 'Sí, confirmar y pagar'}
                   </Text>
                 </Pressable>
@@ -595,7 +604,8 @@ export default function SeguimientoScreen() {
                 <Pressable
                   onPress={() => setConfirmandoFin(false)}
                   disabled={confirmando}
-                  className="bg-white rounded-xl py-4 items-center border-[1.5px] border-principal active:opacity-70">
+                  style={sombra(Paleta.principal, 0.75)}
+                  className="bg-white rounded-xl py-4 items-center active:opacity-70">
                   <Text className="text-principal text-base font-nunito-bold">Volver</Text>
                 </Pressable>
               </View>
@@ -603,7 +613,7 @@ export default function SeguimientoScreen() {
               <Pressable
                 onPress={() => { setError(''); setConfirmandoFin(true); }}
                 className="bg-principal rounded-xl py-4 items-center active:opacity-90">
-                <Text className="text-white text-base font-nunito-bold">Marcar como finalizado</Text>
+                <Text className="text-acento text-base font-nunito-bold">Marcar como finalizado</Text>
               </Pressable>
             )}
           </>
@@ -612,7 +622,7 @@ export default function SeguimientoScreen() {
         {/* Cancelar: sólo antes de que el trabajo arranque */}
         {sePuedeCancelar ? (
           confirmandoCancelar ? (
-            <View className="bg-white border border-error rounded-xl p-4 mt-6">
+            <View style={sombra(Paleta.error, 0.75)} className="bg-white rounded-xl p-4 mt-6">
               <Text className="text-principal text-base font-nunito-bold mb-1">
                 ¿Cancelar este trabajo?
               </Text>
@@ -633,7 +643,8 @@ export default function SeguimientoScreen() {
               <Pressable
                 onPress={() => setConfirmandoCancelar(false)}
                 disabled={cancelando}
-                className="bg-white rounded-xl py-4 items-center border-[1.5px] border-principal active:opacity-70">
+                style={sombra(Paleta.principal, 0.75)}
+                className="bg-white rounded-xl py-4 items-center active:opacity-70">
                 <Text className="text-principal text-base font-nunito-bold">Volver</Text>
               </Pressable>
             </View>
@@ -647,7 +658,7 @@ export default function SeguimientoScreen() {
         ) : null}
 
         {cancelado ? (
-          <View className="flex-row items-start bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mt-2">
+          <View style={sombra(Paleta.neutro)} className="flex-row items-start bg-fondo-suave rounded-xl px-4 py-3 mt-2">
             <MaterialIcons name="cancel" size={18} color={Paleta.error} />
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
               Este trabajo está cancelado. Si todavía lo necesitás, publicalo de nuevo desde

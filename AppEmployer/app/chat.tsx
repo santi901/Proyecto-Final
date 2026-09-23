@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario } from '../auth';
 import { listarMensajes, enviarMensaje, type Mensaje } from '../lib/chat';
 import { obtenerTrabajo, type Trabajo } from '../lib/trabajos';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 
 // El backend no tiene tiempo real (websockets): mientras la pantalla está abierta se
 // consultan los mensajes nuevos cada 4 segundos.
@@ -124,8 +124,9 @@ export default function ChatScreen() {
             return (
               <View key={m.id} className={`mb-2 max-w-[80%] ${mio ? 'self-end items-end' : 'self-start items-start'}`}>
                 <View
+                  style={mio ? undefined : sombra(Paleta.neutro)}
                   className={`rounded-2xl px-4 py-2.5 ${
-                    mio ? 'bg-principal rounded-br-sm' : 'bg-white border border-neutro rounded-bl-sm'
+                    mio ? 'bg-principal rounded-br-sm' : 'bg-white rounded-bl-sm'
                   }`}>
                   <Text className={`text-[15px] font-nunito ${mio ? 'text-white' : 'text-principal'}`}>
                     {m.mensaje}
@@ -146,7 +147,8 @@ export default function ChatScreen() {
           className="flex-row items-end px-3 pt-2 bg-white border-t border-neutro"
           style={{ paddingBottom: insets.bottom + 8 }}>
           <TextInput
-            className="flex-1 bg-fondo-suave rounded-2xl px-4 py-2.5 text-[15px] font-nunito text-principal border border-neutro max-h-28"
+            className="flex-1 bg-fondo-suave rounded-2xl px-4 py-2.5 text-[15px] font-nunito text-principal max-h-28"
+            style={sombra(Paleta.acento)}
             placeholder="Escribí un mensaje"
             placeholderTextColor={Paleta.neutro}
             value={texto}

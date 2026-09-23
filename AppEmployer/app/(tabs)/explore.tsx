@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { misTrabajosPublicados, obtenerPinLocal, type EstadoTrabajo, type Trabajo } from '../../lib/trabajos';
-import { Paleta } from '@/constants/theme';
+import { Paleta, sombra } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
   pendiente: 'Pendiente',
@@ -15,8 +15,8 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 };
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
-const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
-  pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
+const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string; sombra?: string }> = {
+  pendiente: { fondo: 'bg-fondo-suave', texto: 'text-neutro', sombra: Paleta.neutro },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
   completado: { fondo: 'bg-principal', texto: 'text-white' },
@@ -90,7 +90,7 @@ export default function MisTrabajosScreen() {
         {!!error && (
           <View className="items-center py-6">
             <Text className="text-error text-sm font-nunito text-center mb-3">{error}</Text>
-            <Pressable onPress={cargar} className="px-4 py-2 rounded-lg border border-principal active:opacity-70">
+            <Pressable onPress={cargar} style={sombra(Paleta.principal, 0.75)} className="px-4 py-2 rounded-lg active:opacity-70">
               <Text className="text-principal text-sm font-nunito-semi">Reintentar</Text>
             </Pressable>
           </View>
@@ -112,10 +112,13 @@ export default function MisTrabajosScreen() {
             <Pressable
               key={t.id}
               onPress={() => router.push({ pathname: '/seguimiento', params: { trabajoId: t.id } } as any)}
-              className="bg-white rounded-xl border border-neutro p-4 mb-3 active:opacity-70">
+              style={sombra(Paleta.acento)}
+              className="bg-white rounded-xl p-4 mb-3 active:opacity-70">
               <View className="flex-row justify-between items-start mb-1">
                 <Text className="text-base font-nunito-bold text-principal flex-1 pr-2">{t.titulo}</Text>
-                <View className={`rounded-full px-2.5 py-1 ${chip.fondo}`}>
+                <View
+                  style={chip.sombra ? sombra(chip.sombra) : undefined}
+                  className={`rounded-full px-2.5 py-1 ${chip.fondo}`}>
                   <Text className={`text-[11px] font-nunito-bold ${chip.texto}`}>{ESTADO_LABEL[t.estado]}</Text>
                 </View>
               </View>
@@ -136,7 +139,8 @@ export default function MisTrabajosScreen() {
                 ) : (
                   <Pressable
                     onPress={() => setPinVisible(s => ({ ...s, [t.id]: true }))}
-                    className="rounded-lg py-2.5 items-center border border-principal mt-3 active:opacity-70">
+                    style={sombra(Paleta.principal, 0.75)}
+                    className="rounded-lg py-2.5 items-center mt-3 active:opacity-70">
                     <Text className="text-principal text-sm font-nunito-semi">Ver PIN</Text>
                   </Pressable>
                 )

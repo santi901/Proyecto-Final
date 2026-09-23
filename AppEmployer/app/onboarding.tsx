@@ -114,7 +114,7 @@ export default function OnboardingScreen() {
         <Pressable
           onPress={siguiente}
           className="bg-principal rounded-xl py-4 items-center active:opacity-90">
-          <Text className="text-white text-base font-nunito-bold">
+          <Text className="text-acento text-base font-nunito-bold">
             {esUltima ? 'Empezar' : 'Siguiente'}
           </Text>
         </Pressable>
