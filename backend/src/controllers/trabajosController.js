@@ -1,67 +1,21 @@
 const supabase = require('../config/supabase')
 const { generarPin, hashearPin, validarPin } = require('../utils/pin')
+const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
+const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
+const { emitirFinTrabajo } = require('../realtime/socket')
 
 const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
 
-// Backend NestJS de Nacho (verificación, ubicación, matching, notificaciones).
+const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
+
+// Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí (matching y
+// notificaciones se resolvieron aparte — ver services/matchingService.js y
+// services/notificacionesService.js).
 const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
-
-// Nunca debe frenar el flujo del trabajo: si el servicio de notificaciones
-// está caído o el usuario no tiene push token, esto solo loguea y sigue.
-async function notificar(destinatarioId, { tipo, mensaje, titulo, trabajoId }) {
-  if (!destinatarioId) return
-  try {
-    const respuesta = await fetch(`${NACHO_API_URL}/notificaciones`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ destinatarioId, tipo, mensaje, titulo, trabajoId }),
-    })
-    // fetch no rechaza en un status de error HTTP, solo en error de red — sin
-    // este chequeo, un 400 de Nacho (ej. destinatarioId inválido) se pierde
-    // en silencio y no queda rastro de que la notificación no se guardó.
-    if (!respuesta.ok) {
-      const detalle = await respuesta.text().catch(() => '')
-      console.error(`Notificación rechazada por Nacho (destinatarioId=${destinatarioId}, tipo=${tipo}): ${respuesta.status} ${detalle}`)
-    }
-  } catch (error) {
-    console.error('Error mandando notificación:', error.message)
-  }
-}
-
-async function notificarEmpleador(perfilId, payload) {
-  const { data } = await supabase.from('perfiles').select('user_id').eq('id', perfilId).maybeSingle()
-  if (data?.user_id) await notificar(data.user_id, payload)
-}
-
-async function notificarEmpleado(empleadoId, payload) {
-  const { data } = await supabase.from('empleados').select('user_id').eq('id', empleadoId).maybeSingle()
-  if (data?.user_id) await notificar(data.user_id, payload)
-}
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
   return Math.round((new Date(trabajo.finalizado_en) - new Date(trabajo.iniciado_en)) / 1000)
-}
-
-// Le pide a /matching quiénes son los trabajadores que matchean (categoría +
-// distancia + disponibilidad) y les manda la notificación de nueva oferta.
-async function notificarNuevoTrabajo(trabajo) {
-  try {
-    const respuesta = await fetch(
-      `${NACHO_API_URL}/matching/trabajadores-disponibles?trabajoId=${trabajo.id}`,
-    )
-    if (!respuesta.ok) return
-    const candidatos = await respuesta.json()
-
-    await Promise.all(candidatos.map((candidato) => notificar(candidato.userId, {
-      tipo:    'nueva_oferta',
-      titulo:  'Nuevo trabajo disponible',
-      mensaje: `Hay un nuevo trabajo de ${trabajo.categoria} cerca tuyo: "${trabajo.titulo}"`,
-      trabajoId: trabajo.id,
-    })))
-  } catch (error) {
-    console.error('Error buscando trabajadores para notificar:', error.message)
-  }
 }
 
 async function crearTrabajo(req, res) {
@@ -290,13 +244,18 @@ async function validarPinTrabajo(req, res) {
   })
 }
 
+// Sprint 3 — "Confirmación de finalización por ambas partes antes de liberar el
+// pago": ninguna de las dos partes puede completar el trabajo unilateralmente.
+// Cada una llama este mismo endpoint (ya lo hacían ambas apps) y solo cuando
+// las dos confirmaron el estado pasa a 'completado' — recién ahí se habilita
+// calificar (que es, hoy, lo que gatea "liberar" algo en este proyecto).
 async function completarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId, tipo } = req.usuario
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, trabajador_id, empleador_id, iniciado_en')
+    .select('id, estado, trabajador_id, empleador_id, iniciado_en, confirmado_empleado_en, confirmado_empleador_en')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -320,14 +279,57 @@ async function completarTrabajo(req, res) {
     }
   }
 
-  const finalizadoEn = new Date().toISOString()
-  await supabase.from('trabajos').update({ estado: 'completado', finalizado_en: finalizadoEn }).eq('id', trabajoId)
+  // Idempotente: si esta misma parte ya había confirmado, no hace nada de nuevo.
+  const yaConfirmoEstaParte = tipo === 'empleado' ? trabajo.confirmado_empleado_en : trabajo.confirmado_empleador_en
+  if (yaConfirmoEstaParte) {
+    return res.json({
+      message: 'Ya confirmaste la finalización. Esperando confirmación de la otra parte.',
+      estado: 'en_progreso',
+      esperandoConfirmacion: true,
+    })
+  }
+
+  const ahora = new Date().toISOString()
+  const campoConfirmacion = tipo === 'empleado' ? 'confirmado_empleado_en' : 'confirmado_empleador_en'
+  const otraParteYaConfirmo = tipo === 'empleado' ? trabajo.confirmado_empleador_en : trabajo.confirmado_empleado_en
+
+  if (!otraParteYaConfirmo) {
+    // Primera confirmación: solo se registra, el trabajo sigue en_progreso.
+    await supabase.from('trabajos').update({ [campoConfirmacion]: ahora }).eq('id', trabajoId)
+
+    res.json({
+      message: 'Confirmaste la finalización. Esperando confirmación de la otra parte.',
+      estado: 'en_progreso',
+      esperandoConfirmacion: true,
+    })
+
+    const payload = {
+      tipo:    'cambio_estado',
+      titulo:  'Confirmación pendiente',
+      mensaje: 'La otra parte marcó el trabajo como completado. Confirmalo vos para cerrarlo.',
+      trabajoId,
+    }
+    if (tipo === 'empleado') {
+      notificarEmpleador(trabajo.empleador_id, payload)
+    } else if (trabajo.trabajador_id) {
+      notificarEmpleado(trabajo.trabajador_id, payload)
+    }
+    return
+  }
+
+  // Segunda confirmación: ya confirmaron ambas partes, se cierra el trabajo.
+  const finalizadoEn = ahora
+  await supabase
+    .from('trabajos')
+    .update({ estado: 'completado', finalizado_en: finalizadoEn, [campoConfirmacion]: ahora })
+    .eq('id', trabajoId)
 
   const duracionSegundos = calcularDuracionSegundos({ ...trabajo, finalizado_en: finalizadoEn })
 
-  res.json({ message: 'Trabajo completado exitosamente', duracionSegundos })
+  res.json({ message: 'Trabajo completado exitosamente', estado: 'completado', duracionSegundos })
 
-  // Se avisa a la otra parte, no a quien acaba de marcar el trabajo como completado.
+  emitirFinTrabajo(trabajoId, { estado: 'completado' })
+
   const payload = {
     tipo:    'cambio_estado',
     titulo:  'Trabajo completado',
@@ -338,6 +340,90 @@ async function completarTrabajo(req, res) {
     notificarEmpleador(trabajo.empleador_id, payload)
   } else if (trabajo.trabajador_id) {
     notificarEmpleado(trabajo.trabajador_id, payload)
+  }
+}
+
+// Sprint 3 — estado 'cancelado'. Solo el empleador dueño puede cancelar, y solo
+// mientras nadie empezó a trabajar de verdad (pendiente/asignado); una vez que
+// se validó el PIN (en_progreso) ya no se puede cancelar por acá.
+async function cancelarTrabajo(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+  const { motivo } = req.body
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (trabajo.empleador_id !== perfil.id) {
+    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+  if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
+    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
+    return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+  }
+
+  const { error } = await supabase
+    .from('trabajos')
+    .update({
+      estado: 'cancelado',
+      cancelado_por: 'empleador',
+      cancelado_en: new Date().toISOString(),
+      motivo_cancelacion: motivo ?? null,
+    })
+    .eq('id', trabajoId)
+
+  if (error) {
+    console.error(`Error cancelando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error cancelando trabajo' })
+  }
+
+  res.json({ message: 'Trabajo cancelado' })
+
+  emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
+
+  if (trabajo.trabajador_id) {
+    notificarEmpleado(trabajo.trabajador_id, {
+      tipo:    'cambio_estado',
+      titulo:  'Trabajo cancelado',
+      mensaje: 'El empleador canceló este trabajo.',
+      trabajoId,
+    })
+  }
+}
+
+// Expone el matching portado (matchingService.js) para que el empleador pueda
+// ver quién matchea con su trabajo, sin esperar al ciclo de notificación.
+async function obtenerCandidatos(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+  const { radioKm } = req.query
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de ver candidatos' })
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, empleador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (trabajo.empleador_id !== perfil.id) {
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+
+  try {
+    const candidatos = await buscarTrabajadoresDisponibles(trabajoId, radioKm ? Number(radioKm) : undefined)
+    res.json({ candidatos })
+  } catch (error) {
+    console.error(`Error buscando candidatos (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    res.status(error.status ?? 500).json({ error: error.message ?? 'Error buscando candidatos' })
   }
 }
 
@@ -414,4 +500,5 @@ async function calificarTrabajo(req, res) {
 module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
+  cancelarTrabajo, obtenerCandidatos,
 }
