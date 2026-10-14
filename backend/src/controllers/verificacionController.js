@@ -26,6 +26,14 @@ async function compararCaras(req, res) {
     return res.status(400).json({ error: 'Falta la foto del DNI o la selfie.' })
   }
 
+  // Si la app arma mal el multipart (por ej. `new File(uri)` en React Native), las
+  // fotos llegan con 0 bytes — y dos buffers vacíos son "iguales", así que sin
+  // este chequeo el error engañoso de abajo ("misma imagen") tapa el problema real.
+  if (dni.size === 0 || selfie.size === 0) {
+    console.error(`Verificación rechazada (userId=${userId}): llegó una imagen vacía (dni=${dni.size} bytes, selfie=${selfie.size} bytes). Revisar cómo arma el FormData la app.`)
+    return res.status(400).json({ error: 'Una de las fotos llegó vacía. Volvé a elegirla e intentá de nuevo.' })
+  }
+
   if (dni.buffer.equals(selfie.buffer)) {
     console.error(`Verificación rechazada (userId=${userId}): la foto de DNI y la selfie son el mismo archivo (bytes idénticos).`)
     return res.status(400).json({ error: 'El DNI y la selfie no pueden ser la misma imagen.' })

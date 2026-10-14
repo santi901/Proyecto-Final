@@ -20,6 +20,10 @@ async function subirEvidencia(req, res) {
     console.error(`Evidencia rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no se recibió el campo 'foto'.`)
     return res.status(400).json({ error: 'Tenés que enviar una foto' })
   }
+  if (req.file.size === 0) {
+    console.error(`Evidencia rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): la foto llegó vacía (0 bytes). Revisar cómo arma el FormData la app.`)
+    return res.status(400).json({ error: 'La foto llegó vacía. Volvé a sacarla e intentá de nuevo.' })
+  }
 
   const { data: trabajo } = await supabase
     .from('trabajos').select('id, estado, trabajador_id, empleador_id').eq('id', trabajoId).maybeSingle()

@@ -1,5 +1,4 @@
-import { Platform } from 'react-native';
-import { File } from 'expo-file-system';
+import { adjuntarImagen } from './archivos';
 import { fetchAutenticado } from '../auth';
 
 // Foto de evidencia del trabajo terminado. La guarda el backend en S3:
@@ -13,13 +12,7 @@ export async function subirEvidencia(trabajoId: string, uri: string): Promise<vo
   const form = new FormData();
   const nombre = `evidencia-${trabajoId}.jpg`;
 
-  if (Platform.OS === 'web') {
-    // En web el picker devuelve una URI de blob: hay que adjuntar el archivo en sí.
-    const blob = await (await fetch(uri)).blob();
-    form.append('foto', blob, nombre);
-  } else {
-    form.append('foto', new File(uri), nombre);
-  }
+  await adjuntarImagen(form, 'foto', uri, nombre);
 
   let res: Response;
   try {
