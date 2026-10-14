@@ -3,9 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Pressable,
-  ScrollView,
   Text,
-  TextInput,
   View,
   Image,
 } from 'react-native';
@@ -13,11 +11,16 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
 import { registrarEmpleado, API_URL } from '../auth';
 import { useRouter } from 'expo-router';
-import { WebView } from 'react-native-webview';
+import MapaHtml from '../components/mapa-html';
+import SelectorCategorias from '../components/selector-categorias';
+import { Paleta } from '@/constants/theme';
+import VistaFormulario from '../components/vista-formulario';
+import CampoTexto from '../components/campo-texto';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -46,6 +49,10 @@ export default function RegisterScreen() {
     direccion: '',
     radio_busqueda: '',
   });
+
+  // Categorías en las que trabaja: las usa el matching de Ignacio para decidir
+  // qué trabajos se le pueden ofrecer.
+  const [categorias, setCategorias] = useState<string[]>([]);
 
   const [fotoPerfil, setFotoPerfil] = useState<string | null>(null);
   const [fotoDni, setFotoDni] = useState<string | null>(null);
@@ -135,6 +142,10 @@ export default function RegisterScreen() {
       setError('Completá todos los campos obligatorios.');
       return;
     }
+    if (categorias.length === 0) {
+      setError('Elegí al menos una categoría de trabajo.');
+      return;
+    }
     setPaso(3);
   }
 
@@ -152,7 +163,12 @@ export default function RegisterScreen() {
       setError('Completá todos los campos obligatorios.');
       return;
     }
-  
+
+    if (categorias.length === 0) {
+      setError('Volvé al paso anterior y elegí al menos una categoría de trabajo.');
+      return;
+    }
+
     if (form.password !== form.password2) {
       setError('Las contraseñas no coinciden.');
       return;
@@ -201,16 +217,8 @@ export default function RegisterScreen() {
     setVerifEstado('procesando');
     try {
       const formData = new FormData();
-      formData.append('dni', {
-        uri: fotoDni!,
-        name: `dni-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
-      formData.append('selfie', {
-        uri: fotoPerfil!,
-        name: `selfie-${form.dni}.jpg`,
-        type: 'image/jpeg',
-      } as any);
+      formData.append('dni', new File(fotoDni!), `dni-${form.dni}.jpg`);
+      formData.append('selfie', new File(fotoPerfil!), `selfie-${form.dni}.jpg`);
       formData.append('userId', form.dni);
 
       const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
@@ -266,6 +274,7 @@ export default function RegisterScreen() {
         codigoPostal:    form.codigo_postal,
         direccion:       form.direccion,
         radioBusqueda:   parseFloat(form.radio_busqueda) || 10,
+        categorias,
         fotoUrl:         fotoPerfilUrl,
         fotoDniUrl:      fotoDniUrl,
         lat:             coordenadas?.lat ?? null,
@@ -292,8 +301,6 @@ export default function RegisterScreen() {
     if (soloNumeros.length <= 4) return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2)}`;
     return `${soloNumeros.slice(0, 2)}/${soloNumeros.slice(2, 4)}/${soloNumeros.slice(4, 8)}`;
   }
-  const inputClass = 'bg-[#262626] rounded-[10px] px-4 py-3.5 mb-4 text-base text-white border border-[#3a3a3a]';
-  
   async function buscarCoordenadas(direccion: string) {
     if (direccion.length < 5) return;
     try {
@@ -317,15 +324,15 @@ export default function RegisterScreen() {
   if (verifEstado) {
     return (
       <View
-        className="flex-1 bg-[#1a1a1a] items-center justify-center px-8"
+        className="flex-1 bg-fondo items-center justify-center px-8"
         style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
         {verifEstado === 'procesando' && (
           <>
-            <ActivityIndicator size="large" color="#FFD942" />
-            <Text className="text-white text-xl font-bold text-center mt-6 mb-2">
+            <ActivityIndicator size="large" color={Paleta.principal} />
+            <Text className="text-principal text-xl font-nunito-bold text-center mt-6 mb-2">
               Verificando tu identidad…
             </Text>
-            <Text className="text-[#94a3b8] text-sm text-center leading-5">
+            <Text className="text-neutro text-sm text-center leading-5 font-nunito">
               Estamos comparando la foto de tu DNI con tu selfie. Esto puede tardar unos segundos.
             </Text>
           </>
@@ -333,11 +340,11 @@ export default function RegisterScreen() {
 
         {verifEstado === 'aprobado' && (
           <>
-            <View className="w-24 h-24 rounded-full bg-[#1d8348] items-center justify-center mb-6">
+            <View className="w-24 h-24 rounded-full bg-exito items-center justify-center mb-6">
               <MaterialIcons name="check" size={56} color="#ffffff" />
             </View>
-            <Text className="text-white text-2xl font-black text-center mb-2">¡Identidad verificada!</Text>
-            <Text className="text-[#94a3b8] text-sm text-center leading-5">
+            <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">¡Identidad verificada!</Text>
+            <Text className="text-neutro text-sm text-center leading-5 font-nunito">
               Listo, confirmamos que sos vos. Te estamos llevando a la app…
             </Text>
           </>
@@ -345,15 +352,15 @@ export default function RegisterScreen() {
 
         {verifEstado === 'rechazado' && (
           <>
-            <View className="w-24 h-24 rounded-full bg-[#e74c3c] items-center justify-center mb-6">
+            <View className="w-24 h-24 rounded-full bg-error items-center justify-center mb-6">
               <MaterialIcons name="close" size={56} color="#ffffff" />
             </View>
-            <Text className="text-white text-2xl font-black text-center mb-2">No pudimos verificarte</Text>
-            <Text className="text-[#94a3b8] text-sm text-center leading-5 mb-8">{verifMensaje}</Text>
+            <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">No pudimos verificarte</Text>
+            <Text className="text-neutro text-sm text-center leading-5 mb-8 font-nunito">{verifMensaje}</Text>
             <Pressable
               onPress={() => { setVerifEstado(null); setError(''); }}
-              className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90">
-              <Text className="text-[#1a1a1a] text-base font-extrabold">Reintentar</Text>
+              className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90">
+              <Text className="text-white text-base font-nunito-bold">Reintentar</Text>
             </Pressable>
           </>
         )}
@@ -362,82 +369,78 @@ export default function RegisterScreen() {
   }
 
   return (
-    <ScrollView
-      className="flex-1 bg-[#1a1a1a]"
+    <VistaFormulario
       contentContainerStyle={{
         paddingHorizontal: 28,
         paddingTop: insets.top + 24,
         paddingBottom: insets.bottom + 32,
-      }}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}>
+      }}>
       <View className="flex-row items-center gap-2.5 mb-7">
-        <View className="w-11 h-11 rounded-xl bg-[#FFD942] items-center justify-center">
-          <Text className="text-2xl font-black text-[#1a1a1a]">C</Text>
+        <View className="w-11 h-11 rounded-xl bg-acento items-center justify-center">
+          <Text className="text-2xl font-nunito-bold text-principal">C</Text>
         </View>
-        <Text className="text-[13px] font-bold tracking-[2px] text-[#FFD942]">EMPLOYEE</Text>
+        <Text className="text-[13px] font-nunito-bold tracking-[2px] text-principal">EMPLOYEE</Text>
       </View>
 
       {paso === 1 ? (
         <>
-          <Text className="text-3xl font-bold text-white mb-1">
-            Creá tu cuenta en{'\n'}
-            <Text className="text-[#FFD942]">ChanguitApp</Text>
+          <Text className="text-3xl font-nunito-bold text-principal mb-1">
+            Creá tu cuenta en{'\n'}ChanguitApp
           </Text>
           <Pressable onPress={() => router.replace('/')} className="mb-7">
-            <Text className="text-sm text-[#94a3b8]">
-              ¿Ya tenés una cuenta? <Text className="text-[#FFD942] font-semibold">Iniciá sesión</Text>
+            <Text className="text-sm text-neutro font-nunito">
+              ¿Ya tenés una cuenta? <Text className="text-principal font-nunito-semi">Iniciá sesión</Text>
             </Text>
           </Pressable>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu mail" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Ingresá tu mail"
             value={form.email} onChangeText={v => actualizar('email', v)}
             autoCapitalize="none" keyboardType="email-address"
             autoComplete="off" textContentType="none" importantForAutofill="no"
             autoCorrect={false} spellCheck={false} />
 
-          <TextInput className={inputClass} placeholder="Ingresá tu contraseña" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Ingresá tu contraseña"
             value={form.password} onChangeText={v => actualizar('password', v)} secureTextEntry />
 
-          <TextInput className={inputClass} placeholder="Volvé a ingresar tu contraseña" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Volvé a ingresar tu contraseña"
             value={form.password2} onChangeText={v => actualizar('password2', v)} secureTextEntry />
 
-          <Text className="text-base font-bold text-white mt-2 mb-3">Datos personales</Text>
+          <Text className="text-base font-nunito-bold text-principal mt-2 mb-3">Datos personales</Text>
 
-          <TextInput className={inputClass} placeholder="Nombre/s" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Nombre/s"
             value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
 
-          <TextInput className={inputClass} placeholder="Apellido/s" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Apellido/s"
             value={form.apellido} onChangeText={v => actualizar('apellido', v)} />
 
-          <TextInput className={inputClass} placeholder="Fecha de nacimiento (DD/MM/AAAA)" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Fecha de nacimiento (DD/MM/AAAA)"
             value={form.fecha_nacimiento} onChangeText={v => actualizar('fecha_nacimiento', formatearFecha(v))}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="DNI / CUIT" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="DNI / CUIT"
             value={form.dni} onChangeText={v => actualizar('dni', v)}
             keyboardType="numeric" />
 
-          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={irAlPaso2}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
+            <Text className="text-white text-base font-nunito-bold">Siguiente</Text>
           </Pressable>
         </>
       ) : paso === 2 ? (
         <>
-          <Text className="text-3xl font-bold text-white mb-1">Ya falta poco</Text>
-          <Text className="text-sm text-[#94a3b8] mb-7">
+          <Text className="text-3xl font-nunito-bold text-principal mb-1">Ya falta poco</Text>
+          <Text className="text-sm text-neutro mb-7 font-nunito">
             Te pedimos solo un poco más de paciencia
           </Text>
 
-          <TextInput className={inputClass} placeholder="Ingresá tu código postal" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Ingresá tu código postal"
             value={form.codigo_postal} onChangeText={v => actualizar('codigo_postal', v)}
             keyboardType="numeric" />
 
-          <TextInput className={inputClass} placeholder="Dirección personal" placeholderTextColor="#64748b"
+          <CampoTexto placeholder="Dirección personal"
             value={form.direccion}
             onChangeText={v => {
               actualizar('direccion', v);
@@ -447,44 +450,50 @@ export default function RegisterScreen() {
 
           {coordenadas && (
             <View style={{ height: 180, borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
-              <WebView
-                source={{
-                  html: `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                      <meta name="viewport" content="width=device-width, initial-scale=1">
-                      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-                      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                      <style>html,body,#map{margin:0;padding:0;height:100%;width:100%;}</style>
-                    </head>
-                    <body>
-                      <div id="map"></div>
-                      <script>
-                        var map = L.map('map').setView([${coordenadas.lat}, ${coordenadas.lng}], 16);
-                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-                        L.marker([${coordenadas.lat}, ${coordenadas.lng}]).addTo(map);
-                      </script>
-                    </body>
-                    </html>
-                  `
-                }}
+              <MapaHtml
+                html={`
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+                    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                    <style>html,body,#map{margin:0;padding:0;height:100%;width:100%;}</style>
+                  </head>
+                  <body>
+                    <div id="map"></div>
+                    <script>
+                      var map = L.map('map').setView([${coordenadas.lat}, ${coordenadas.lng}], 16);
+                      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                      L.marker([${coordenadas.lat}, ${coordenadas.lng}]).addTo(map);
+                    </script>
+                  </body>
+                  </html>
+                `}
                 style={{ flex: 1 }}
-                scrollEnabled={false}
               />
             </View>
           )}
 
-          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          {/* Categorías: definen qué trabajos le puede ofrecer el matching */}
+          <Text className="text-base font-nunito-bold text-principal mt-2 mb-1">¿En qué trabajás?</Text>
+          <Text className="text-sm text-neutro mb-3 font-nunito leading-5">
+            Elegí todas las categorías en las que podés trabajar. Sólo te vamos a ofrecer
+            trabajos de las que marques.
+          </Text>
+
+          <SelectorCategorias seleccionadas={categorias} onCambiar={setCategorias} />
+
+          {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 items-center mt-2 active:opacity-90"
+            className="bg-principal rounded-xl py-4 items-center mt-2 active:opacity-90"
             onPress={irAlPaso3}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Siguiente</Text>
+            <Text className="text-white text-base font-nunito-bold">Siguiente</Text>
           </Pressable>
 
           <Pressable onPress={() => { setError(''); setPaso(1); }} className="mt-4 items-center">
-            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+            <Text className="text-neutro text-sm underline font-nunito">Volver</Text>
           </Pressable>
         </>
       ) : paso === 3 ? (
@@ -503,51 +512,50 @@ export default function RegisterScreen() {
                 { scale: transAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
               ],
             }}
-            className="w-28 h-28 rounded-full bg-[#FFD942] items-center justify-center mb-8">
-            <MaterialIcons name="verified-user" size={56} color="#1a1a1a" />
+            className="w-28 h-28 rounded-full bg-acento items-center justify-center mb-8">
+            <MaterialIcons name="verified-user" size={56} color={Paleta.principal} />
           </Animated.View>
 
-          <Text className="text-4xl font-black text-white text-center mb-3">
-            ¡Ya casi{'\n'}
-            <Text className="text-[#FFD942]">estamos!</Text>
+          <Text className="text-4xl font-nunito-bold text-principal text-center mb-3">
+            ¡Ya casi{'\n'}estamos!
           </Text>
 
-          <Text className="text-base text-[#cbd5e1] text-center leading-6 mb-2 px-2">
+          <Text className="text-base text-neutro text-center leading-6 mb-2 px-2 font-nunito">
             Solo nos falta verificar tu identidad.
           </Text>
-          <Text className="text-sm text-[#94a3b8] text-center leading-5 mb-10 px-2">
+          <Text className="text-sm text-neutro text-center leading-5 mb-10 px-2 font-nunito">
             En el último paso te vamos a pedir una foto de tu DNI y una selfie para confirmar que sos vos.
           </Text>
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 w-full items-center active:opacity-90"
+            className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90"
             onPress={() => setPaso(4)}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">Continuar</Text>
+            <Text className="text-white text-base font-nunito-bold">Continuar</Text>
           </Pressable>
 
           <Pressable onPress={() => { setError(''); setPaso(2); }} className="mt-4 items-center">
-            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+            <Text className="text-neutro text-sm underline font-nunito">Volver</Text>
           </Pressable>
         </Animated.View>
       ) : (
         <>
-          <Text className="text-3xl font-bold text-white mb-1">Por último...</Text>
-          <Text className="text-sm text-[#94a3b8] mb-6">
+          <Text className="text-3xl font-nunito-bold text-principal mb-1">Por último...</Text>
+          <Text className="text-sm text-neutro mb-6 font-nunito">
             Completá estos datos para terminar de configurar tu perfil
           </Text>
 
           {/* Foto de perfil */}
           <Pressable
             onPress={() => seleccionarFoto('perfil')}
-            className="flex-row items-center bg-[#262626] rounded-xl p-4 mb-3 border border-[#3a3a3a] active:opacity-70">
-            <View className="w-14 h-14 rounded-full bg-[#3a3a3a] items-center justify-center overflow-hidden">
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            <View className="w-14 h-14 rounded-full bg-fondo-suave items-center justify-center overflow-hidden">
               {fotoPerfil ? (
                 <Image source={{ uri: fotoPerfil }} className="w-14 h-14" />
               ) : (
-                <MaterialIcons name="person" size={30} color="#94a3b8" />
+                <MaterialIcons name="person" size={30} color={Paleta.neutro} />
               )}
             </View>
-            <Text className="flex-1 text-[#cbd5e1] text-sm ml-3">
+            <Text className="flex-1 text-neutro text-sm ml-3 font-nunito">
               {fotoPerfil
                 ? '✓ Foto de perfil cargada'
                 : 'Subí tu foto de perfil para que podamos reconocerte mejor'}
@@ -557,50 +565,50 @@ export default function RegisterScreen() {
           {/* Foto del DNI */}
           <Pressable
             onPress={() => seleccionarFoto('dni')}
-            className="flex-row items-center bg-[#262626] rounded-xl p-4 mb-3 border border-[#3a3a3a] active:opacity-70">
-            <View className="w-14 h-14 rounded-lg bg-[#3a3a3a] items-center justify-center overflow-hidden">
+            className="flex-row items-center bg-white rounded-xl p-4 mb-3 border border-neutro active:opacity-70">
+            <View className="w-14 h-14 rounded-lg bg-fondo-suave items-center justify-center overflow-hidden">
               {fotoDni ? (
                 <Image source={{ uri: fotoDni }} className="w-14 h-14" />
               ) : (
-                <MaterialIcons name="badge" size={30} color="#94a3b8" />
+                <MaterialIcons name="badge" size={30} color={Paleta.neutro} />
               )}
             </View>
-            <Text className="flex-1 text-[#cbd5e1] text-sm ml-3">
+            <Text className="flex-1 text-neutro text-sm ml-3 font-nunito">
               {fotoDni
                 ? '✓ Foto del DNI cargada'
                 : 'Agregá una foto de tu DNI para verificar tu identidad'}
             </Text>
           </Pressable>
 
-          <View className="flex-row items-start bg-[#1f2937] rounded-lg p-3 mb-5">
-            <MaterialIcons name="verified-user" size={18} color="#FFD942" />
-            <Text className="flex-1 text-[#94a3b8] text-xs ml-2 leading-4">
+          <View className="flex-row items-start bg-fondo-suave rounded-lg p-3 mb-5">
+            <MaterialIcons name="verified-user" size={18} color={Paleta.principal} />
+            <Text className="flex-1 text-neutro text-xs ml-2 leading-4 font-nunito">
               Comparamos la foto de tu DNI con tu foto de perfil para confirmar que sos vos.
             </Text>
           </View>
 
-          {error ? <Text className="text-[#fca5a5] text-center mb-2 text-[13px]">{error}</Text> : null}
+          {error ? <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text> : null}
 
           <Pressable
-            className="bg-[#FFD942] rounded-xl py-4 items-center active:opacity-90"
+            className="bg-principal rounded-xl py-4 items-center active:opacity-90"
             onPress={handleRegistro}
             disabled={cargando}>
-            <Text className="text-[#1a1a1a] text-base font-extrabold">
+            <Text className="text-white text-base font-nunito-bold">
               {cargando ? 'Creando cuenta...' : 'Continuar a inicio'}
             </Text>
           </Pressable>
 
-          <Text className="text-[11px] text-[#64748b] text-center mt-4 leading-4">
+          <Text className="text-[11px] text-neutro text-center mt-4 leading-4 font-nunito">
             Al crear una cuenta automáticamente aceptás nuestra{' '}
-            <Text className="underline">política de privacidad</Text> y{' '}
-            <Text className="underline">acuerdo de usuario</Text>
+            <Text className="underline font-nunito">política de privacidad</Text> y{' '}
+            <Text className="underline font-nunito">acuerdo de usuario</Text>
           </Text>
 
           <Pressable onPress={() => { setError(''); setPaso(3); }} className="mt-4 items-center">
-            <Text className="text-[#94a3b8] text-sm underline">Volver</Text>
+            <Text className="text-neutro text-sm underline font-nunito">Volver</Text>
           </Pressable>
         </>
       )}
-    </ScrollView>
+    </VistaFormulario>
   );
 }

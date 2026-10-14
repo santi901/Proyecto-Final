@@ -1,70 +1,66 @@
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
-import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { API_URL, getAccessToken } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { fetchAutenticado, getUsuario } from '../auth';
 
-// Mostrar la notificación también si llega con la app abierta.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Notificaciones push (Expo). Los backends ya arman y mandan un push en cada cambio de
+// estado de un trabajo, pero para entregarlo necesitan el Expo push token del usuario.
 
-// Pide permiso, obtiene el Expo push token y lo registra en el backend
-// (POST /api/notificaciones/registrar-token), que es de donde lo saca
-// notificacionesService.notificar() para mandar el push. Nunca tira: si algo
-// falla (web, emulador, permiso denegado, sin projectId de EAS) solo loguea y
-// las notificaciones igual quedan guardadas en el historial del backend.
+// Con la app abierta, las notificaciones también se muestran (por defecto se descartan).
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
+// Pide permiso, saca el Expo push token del dispositivo y lo registra para el usuario logueado:
+// POST /api/notificaciones/registrar-token  body { expoPushToken } (el usuario sale del JWT)
 export async function registrarNotificacionesPush(): Promise<void> {
-  try {
-    if (Platform.OS === 'web' || !Device.isDevice) {
-      console.log('Push: solo funciona en un dispositivo físico, se omite.');
-      return;
-    }
+  if (Platform.OS === 'web') return;
 
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'ChanguitApp',
-        importance: Notifications.AndroidImportance.HIGH,
-      });
-    }
+  const usuario = await getUsuario();
+  if (!usuario) return;
 
-    let { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') {
-      ({ status } = await Notifications.requestPermissionsAsync());
-    }
-    if (status !== 'granted') {
-      console.log('Push: el usuario no dio permiso de notificaciones.');
-      return;
-    }
-
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-    if (!projectId) {
-      console.log('Push: falta el projectId de EAS (correr `eas init`), no se puede obtener el token.');
-      return;
-    }
-
-    const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync({ projectId });
-
-    const token = await getAccessToken();
-    const res = await fetchConTimeout(`${API_URL}/api/notificaciones/registrar-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ expoPushToken }),
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      console.log('Push: el backend rechazó el token:', data.error);
-    }
-  } catch (e: any) {
-    console.log('Push: no se pudo registrar el token:', e?.message);
   }
+
+  let { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') {
+    ({ status } = await Notifications.requestPermissionsAsync());
+  }
+  if (status !== 'granted') return;
+
+  // Expo emite el token para un proyecto de EAS: sin `projectId` (se crea con `eas init`) falla.
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+  const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync(
+    projectId ? { projectId } : undefined,
+  );
+
+  const res = await fetchAutenticado('/api/notificaciones/registrar-token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expoPushToken }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Error al registrar el token de notificaciones (${res.status}). ${txt}`);
+  }
+}
+
+// Para llamar desde las pantallas al entrar con sesión: nunca frena la app, si algo falla
+// (sin permiso, Expo Go en Android, backend caído) solo se loguea.
+export function activarNotificacionesPush() {
+  registrarNotificacionesPush().catch(e =>
+    console.log('No se pudieron activar las notificaciones push:', e?.message),
+  );
 }

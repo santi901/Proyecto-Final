@@ -88,18 +88,17 @@ Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` 
 
 ## Expo apps (`AppEmployee/`, `AppEmployer/`)
 
-Both apps share an identical `app/trabajo/[id].tsx` detail screen (opened from each app's `(tabs)/explore.tsx` list) that adapts by `usuario.tipo`: chat (open and polling every 5s from `asignado` through `en_progreso`, read-only history after), evidence photos (empleado uploads via `expo-image-picker`, empleador views), rating (empleador, once `completado`) and start/end/duration. `lib/notificaciones.ts` registers the Expo push token from `(tabs)/_layout.tsx`; it needs an EAS `projectId` in `app.json` (`eas init`) and a physical device / dev build — without those it just logs and skips.
+Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the screens:
+- `AppEmployee`: `(tabs)/buscar.tsx`, `(tabs)/dashboard.tsx` — worker searches for jobs; `trabajo-en-curso.tsx` (PIN, evidence photo upload, completion), `perfil.tsx`.
+- `AppEmployer`: `(tabs)/ofrecer.tsx`, `(tabs)/dashboard.tsx` — employer posts jobs; `seguimiento.tsx` (live tracking, evidence photos, cancel, rating).
+- Both: `chat.tsx` (opened from `components/boton-chat.tsx`) — writable from `asignado` through `en_progreso`, read-only history after.
 
-Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the `(tabs)` screens:
-- `AppEmployee`: `buscar.tsx`, `dashboard.tsx` — worker searches for jobs.
-- `AppEmployer`: `ofrecer.tsx`, `dashboard.tsx` — employer posts jobs.
+Both apps talk to a **single backend** — `backend/` (Express) — via one base URL:
+- `auth.ts` → `EXPO_PUBLIC_API_URL` (defaults `http://localhost:3000`) — exports `API_URL`, `getAccessToken()`, `fetchAutenticado()` (adds the Bearer token, refreshes once on 403, optional timeout) and the `apiGet`/`apiPost` JSON helpers built on it. Used for `/api/auth/*` (login, register, logout, session storage via AsyncStorage), by `lib/trabajos.ts` (jobs lifecycle; in `AppEmployer` also cancel + rating), `lib/chat.ts` (`/api/trabajos/:id/mensajes`, polled every few seconds), `lib/evidencia.ts` (`/api/trabajos/:id/evidencia` — multipart `foto` upload in `AppEmployee`, listing with presigned URLs in `AppEmployer`) and `lib/notificaciones.ts` (`/api/notificaciones/registrar-token`, via `expo-notifications`; needs an EAS `projectId` from `eas init` and a physical device / dev build).
+- `lib/ubicacion.ts` calls `/api/ubicacion/actualizar-ubicacion` with the stored access token. `register.tsx` in each app calls `/api/verificacion/comparar-caras`, posting `dni`/`selfie` as separate multipart fields (matching `backend/src/routes/verificacion.js`'s `multer` field names).
+- There used to be a second base URL (`EXPO_PUBLIC_NACHO_API_URL`) pointing at the NestJS backend above — it's gone now that everything lives in `backend/`. If you see stray references to it or to a hardcoded `ngrok-free.app` placeholder URL, repoint them at `API_URL`.
 
-Both apps now talk to a **single backend** — `backend/` (Nico's Express API) — via one base URL:
-- `auth.ts` → `EXPO_PUBLIC_API_URL` (defaults `http://localhost:3000`) — exports `API_URL` and `getAccessToken()`, used for `/api/auth/*` (login, register, logout, session storage via AsyncStorage).
-- `lib/ubicacion.ts` imports `API_URL`/`getAccessToken` from `auth.ts` and calls `/api/ubicacion/actualizar-ubicacion` (sends the stored access token as a Bearer header — that route requires auth). `register.tsx` in each app calls `/api/verificacion/comparar-caras` the same way, posting `dni`/`selfie` as separate multipart fields (matching `backend/src/routes/verificacion.js`'s `multer` field names).
-- There used to be a second base URL (`EXPO_PUBLIC_NACHO_API_URL`) pointing at the NestJS backend above — it's gone now that verification/location live in `backend/` too. If you see stray references to it or to a hardcoded `ngrok-free.app` placeholder URL, that's leftover from before the consolidation and should be repointed at `API_URL`.
-
-`supabaseClient.ts` in each app hardcodes a Supabase project URL + anon key directly in source (not read from env) — this is the public anon key, used for direct client-side Supabase calls separate from either backend.
+`supabaseClient.ts` in each app hardcodes a Supabase project URL + anon key directly in source (not read from env) — this is the public anon key, used for direct client-side Supabase calls separate from the backend.
 
 Request bodies to the Express backend use camelCase field names (`fechaNacimiento`, `codigoPostal`) — see [backend/CLAUDE.md](backend/CLAUDE.md) for the full camelCase↔snake_case mapping convention.
 

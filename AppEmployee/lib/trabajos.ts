@@ -1,6 +1,11 @@
-import { Platform } from 'react-native';
-import { API_URL, getAccessToken } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import { apiGet, apiPost } from '../auth';
+
+// Flujo de un trabajo del lado del trabajador, contra el backend de Nico
+// (`backend/src/routes/trabajos.js`): solicitud → aceptación → PIN → finalización.
+
+// 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
+// reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
+export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type Trabajo = {
   id: string;
@@ -9,141 +14,76 @@ export type Trabajo = {
   categoria: string;
   nivel_dificultad: string | null;
   precio: number;
-  estado: 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+  estado: EstadoTrabajo;
+  /** Lugar del trabajo: la ubicación del empleador cuando lo publicó. */
   latitud: number;
   longitud: number;
   creado_en: string;
-  solicitud_expira_en?: string | null;
-  iniciado_en?: string | null;
-  finalizado_en?: string | null;
-  confirmado_empleado_en?: string | null;
-  confirmado_empleador_en?: string | null;
+  /** Hasta cuándo se puede aceptar (el backend le da 15 minutos desde que se publica). */
+  solicitud_expira_en: string | null;
+  iniciado_en: string | null;
+  finalizado_en: string | null;
+  /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
+  duracionSegundos?: number | null;
 };
 
-async function authFetch(path: string, options: RequestInit = {}) {
-  const token = await getAccessToken();
-  const res = await fetchConTimeout(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Error del servidor');
-  return data;
+/** Tiempo para responder una solicitud entrante, salvo que expire antes. */
+export const SEGUNDOS_LIMITE_POR_DEFECTO = 30;
+
+export function segundosParaResponder(trabajo: Trabajo): number {
+  if (!trabajo.solicitud_expira_en) return SEGUNDOS_LIMITE_POR_DEFECTO;
+  const hastaQueExpira = Math.floor((new Date(trabajo.solicitud_expira_en).getTime() - Date.now()) / 1000);
+  return Math.max(1, Math.min(SEGUNDOS_LIMITE_POR_DEFECTO, hastaQueExpira));
+}
+
+// "45 min", "1 h 20 min".
+export function formatearDuracion(segundos: number): string {
+  const minutos = Math.max(1, Math.round(segundos / 60));
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas} h ${resto} min` : `${horas} h`;
 }
 
 // GET /api/trabajos — como empleado, devuelve solo los trabajos en estado 'pendiente'.
 export async function listarTrabajos(): Promise<{ trabajos: Trabajo[] }> {
-  return authFetch('/api/trabajos');
-}
-
-// POST /api/trabajos/:id/aceptar
-export async function aceptarTrabajo(id: string): Promise<{ message: string }> {
-  return authFetch(`/api/trabajos/${id}/aceptar`, { method: 'POST' });
+  return apiGet('/api/trabajos');
 }
 
 // GET /api/trabajos/mios — los trabajos que este empleado tiene asignados/en curso/completados.
 export async function misTrabajosAsignados(): Promise<{ trabajos: Trabajo[] }> {
-  return authFetch('/api/trabajos/mios');
+  return apiGet('/api/trabajos/mios');
+}
+
+// GET /api/trabajos/:id
+export async function obtenerTrabajo(id: string): Promise<{ trabajo: Trabajo }> {
+  return apiGet(`/api/trabajos/${id}`);
+}
+
+// POST /api/trabajos/:id/aceptar
+export async function aceptarTrabajo(id: string): Promise<{ message: string }> {
+  return apiPost(`/api/trabajos/${id}/aceptar`);
 }
 
 // POST /api/trabajos/:id/validar-pin — el empleado ingresa el PIN que le dio el
 // empleador en persona para pasar el trabajo de 'asignado' a 'en_progreso'.
 export async function validarPin(id: string, pin: string): Promise<{ success: boolean; message: string }> {
-  return authFetch(`/api/trabajos/${id}/validar-pin`, { method: 'POST', body: JSON.stringify({ pin }) });
+  return apiPost(`/api/trabajos/${id}/validar-pin`, { pin });
 }
 
 // POST /api/trabajos/:id/completar
-export async function completarTrabajo(id: string): Promise<{ message: string; estado: Trabajo['estado']; esperandoConfirmacion?: boolean }> {
-  return authFetch(`/api/trabajos/${id}/completar`, { method: 'POST' });
-}
-
-// ── Detalle del trabajo: chat, evidencia, calificación (Sprint 4) ─────────────
-
-export type TrabajoDetalle = Trabajo & {
-  trabajador_id: string | null;
-  empleador_id: string;
-  duracionSegundos: number | null;
+/**
+ * Completar necesita que confirmen **las dos partes**: la primera llamada deja el trabajo
+ * en `en_progreso` con `esperandoConfirmacion: true`, y recién la segunda lo pasa a
+ * `completado`. Hay que mirar `estado`: que la llamada no falle no significa que cerró.
+ */
+export type ResultadoCompletar = {
+  message: string;
+  estado: EstadoTrabajo;
+  esperandoConfirmacion?: boolean;
+  duracionSegundos?: number | null;
 };
 
-export type Mensaje = {
-  id: string;
-  remitente_id: string;
-  remitente_tipo: 'empleado' | 'empleador';
-  mensaje: string;
-  enviado_en: string;
-};
-
-export type Evidencia = {
-  id: string;
-  url: string;
-  subido_por: string;
-  creado_en: string;
-};
-
-export type Calificacion = {
-  id: string;
-  puntaje: number;
-  comentario: string | null;
-  creado_en: string;
-};
-
-// GET /api/trabajos/:id — incluye duracionSegundos (iniciado_en → finalizado_en).
-export async function obtenerTrabajo(id: string): Promise<{ trabajo: TrabajoDetalle }> {
-  return authFetch(`/api/trabajos/${id}`);
-}
-
-// GET /api/trabajos/:id/mensajes — sigue disponible como historial después de completado.
-export async function listarMensajes(id: string): Promise<{ mensajes: Mensaje[] }> {
-  return authFetch(`/api/trabajos/${id}/mensajes`);
-}
-
-// POST /api/trabajos/:id/mensajes — el backend solo lo permite con el trabajo 'en_progreso'.
-export async function enviarMensaje(id: string, mensaje: string): Promise<{ mensaje: Mensaje }> {
-  return authFetch(`/api/trabajos/${id}/mensajes`, { method: 'POST', body: JSON.stringify({ mensaje }) });
-}
-
-// GET /api/trabajos/:id/evidencia — cada foto viene con una URL firmada (vale 1h).
-export async function listarEvidencia(id: string): Promise<{ evidencias: Evidencia[] }> {
-  return authFetch(`/api/trabajos/${id}/evidencia`);
-}
-
-// POST /api/trabajos/:id/evidencia (multipart, campo 'foto') — solo el empleado asignado.
-// No pasa por authFetch porque no es JSON: el Content-Type multipart lo arma fetch solo.
-export async function subirEvidencia(id: string, uri: string): Promise<{ evidencia: Evidencia }> {
-  const token = await getAccessToken();
-  const formData = new FormData();
-  if (Platform.OS === 'web') {
-    // En web el picker devuelve un blob:/data: URI, no un archivo del sistema.
-    formData.append('foto', await (await fetch(uri)).blob(), 'evidencia.jpg');
-  } else {
-    formData.append('foto', { uri, name: 'evidencia.jpg', type: 'image/jpeg' } as any);
-  }
-
-  const res = await fetchConTimeout(`${API_URL}/api/trabajos/${id}/evidencia`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Error subiendo la foto');
-  return data;
-}
-
-// GET /api/trabajos/:id/calificacion — null si todavía no se calificó.
-export async function obtenerCalificacion(id: string): Promise<{ calificacion: Calificacion | null }> {
-  return authFetch(`/api/trabajos/${id}/calificacion`);
-}
-
-// POST /api/trabajos/:id/calificar — solo el empleador, solo con el trabajo 'completado'.
-export async function calificarTrabajo(id: string, puntaje: number, comentario?: string): Promise<{ message: string }> {
-  return authFetch(`/api/trabajos/${id}/calificar`, { method: 'POST', body: JSON.stringify({ puntaje, comentario }) });
-}
-
-// POST /api/trabajos/:id/cancelar — solo el empleador, mientras esté 'pendiente'/'asignado'.
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
-  return authFetch(`/api/trabajos/${id}/cancelar`, { method: 'POST', body: JSON.stringify({ motivo }) });
+export async function completarTrabajo(id: string): Promise<ResultadoCompletar> {
+  return apiPost(`/api/trabajos/${id}/completar`);
 }

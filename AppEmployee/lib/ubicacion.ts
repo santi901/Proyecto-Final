@@ -1,6 +1,5 @@
 import * as Location from 'expo-location';
-import { API_URL, getAccessToken } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import { fetchAutenticado } from '../auth';
 
 const INTERVALO_UBICACION_MS = 10000;
 
@@ -36,13 +35,9 @@ export async function pedirUbicacion(): Promise<ResultadoUbicacion> {
 // Envía las coordenadas al backend para que las guarde en la base de datos.
 // POST /api/ubicacion/actualizar-ubicacion  body { workerId, lat, lng, jobId? }  (requiere sesión)
 export async function enviarUbicacion(coords: Coordenadas, workerId: string, jobId?: string): Promise<void> {
-  const token = await getAccessToken();
-  const res = await fetchConTimeout(`${API_URL}/api/ubicacion/actualizar-ubicacion`, {
+  const res = await fetchAutenticado('/api/ubicacion/actualizar-ubicacion', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workerId, lat: coords.lat, lng: coords.lng, ...(jobId ? { jobId } : {}) }),
   });
 
@@ -76,4 +71,20 @@ export function seguirUbicacion(
     activo = false;
     clearInterval(id);
   };
+}
+
+// Distancia en línea recta entre dos puntos, en km (Haversine, la misma cuenta que
+// `backend/src/utils/haversine.js`).
+export function distanciaKm(a: Coordenadas, b: Coordenadas): number {
+  const rad = (grados: number) => (grados * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+export function formatearDistancia(km: number): string {
+  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1).replace('.', ',')} km`;
 }

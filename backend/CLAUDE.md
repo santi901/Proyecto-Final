@@ -83,7 +83,7 @@ There used to also be a Textract `DetectDocumentTextCommand` check on the DNI ph
 
 ### Matching (`src/services/matchingService.js`)
 
-Ported from the NestJS project's `src/matching/matching.service.ts` (same algorithm, same `haversine` formula): finds `empleados` whose `categorias` include the job's `categoria`, within each candidate's own `radio_busqueda` (or an overridden `radioKm`) of the *employer's* stored `lat`/`lng` (jobs don't store their own coordinates), excluding workers currently tied to a job in `asignado`/`en_progreso`, sorted by `reputacion` desc then distance asc. Used by `notificarNuevoTrabajo` (on creation and on every reassignment retry) and by `GET /api/trabajos/:id/candidatos`.
+Ported from the NestJS project's `src/matching/matching.service.ts` (same algorithm, same `haversine` formula): finds `empleados` whose `categorias` include the job's `categoria`, within each candidate's own `radio_busqueda` (or an overridden `radioKm`) of the job's own `latitud`/`longitud` (set from the employer's location when the job is published), excluding workers currently tied to a job in `asignado`/`en_progreso`, sorted by `reputacion` desc then distance asc. Used by `notificarNuevoTrabajo` (on creation and on every reassignment retry) and by `GET /api/trabajos/:id/candidatos`.
 
 ### Realtime (`src/realtime/socket.js`)
 

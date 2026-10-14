@@ -53,6 +53,23 @@ export async function limpiarSesion() {
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
+/** Error de una llamada al backend, con el status HTTP que lo produjo. */
+export type ErrorDeApi = Error & { status?: number };
+
+// Si el servidor responde algo que no es JSON (ej. la página de error de un túnel caído),
+// se toma como respuesta vacía para mostrar el error genérico en vez de un SyntaxError.
+async function leerRespuesta(res: Response) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // El status viaja con el error: hay pantallas que distinguen un caso esperado
+    // (ej. 409 "ya calificado") de un error real que hay que mostrar.
+    const error: ErrorDeApi = new Error(data.error || 'Error del servidor');
+    error.status = res.status;
+    throw error;
+  }
+  return data;
+}
+
 async function post(path: string, body: object, token?: string) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -62,9 +79,65 @@ async function post(path: string, body: object, token?: string) {
     headers,
     body: JSON.stringify(body),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Error del servidor');
-  return data;
+  return leerRespuesta(res);
+}
+
+// El access token dura poco (JWT_EXPIRES_IN=15m en el backend): pide uno nuevo con el
+// refresh token guardado. Devuelve null si no hay refresh token o si también venció
+// (ahí no queda otra que loguearse de nuevo).
+async function refrescarAccessToken(): Promise<string | null> {
+  const refreshToken = await AsyncStorage.getItem(K.REFRESH);
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetchConTimeout(`${API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return null;
+
+    const { accessToken } = await res.json();
+    await AsyncStorage.setItem(K.ACCESS, accessToken);
+    return accessToken;
+  } catch {
+    return null;
+  }
+}
+
+// Llamadas autenticadas al backend de Nico: agregan solas el token guardado y, si el
+// servidor lo rechaza por vencido (403), refrescan y reintentan una sola vez.
+// Las usan `lib/trabajos.ts`, `lib/perfil.ts` y `lib/ubicacion.ts`.
+
+export async function fetchAutenticado(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+  const conToken = (token: string | null) => ({
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  let res = await fetchConTimeout(`${API_URL}${path}`, conToken(await getAccessToken()), timeoutMs);
+
+  if (res.status === 403) {
+    const nuevoToken = await refrescarAccessToken();
+    if (nuevoToken) res = await fetchConTimeout(`${API_URL}${path}`, conToken(nuevoToken), timeoutMs);
+  }
+
+  return res;
+}
+
+export async function apiGet(path: string) {
+  return leerRespuesta(await fetchAutenticado(path));
+}
+
+export async function apiPost(path: string, body: object = {}) {
+  return leerRespuesta(await fetchAutenticado(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
 }
 
 // ── Auth functions ────────────────────────────────────────────────────────────
@@ -81,6 +154,8 @@ export async function registrarEmpleado(datos: {
   fechaNacimiento: string; dni: string;
   codigoPostal: string; direccion: string;
   radioBusqueda?: number;
+  /** Categorías en las que trabaja. Las usa el matching de Ignacio para filtrar. */
+  categorias?: string[];
   fotoUrl?: string | null; fotoDniUrl?: string | null;
   lat?: number | null; lng?: number | null;
 }) {

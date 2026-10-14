@@ -1,10 +1,10 @@
 import { Tabs } from 'expo-router';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Pressable, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { registrarNotificacionesPush } from '../../lib/notificaciones';
+import { Paleta } from '@/constants/theme';
 
 export const unstable_settings = {
   initialRouteName: 'ofrecer',
@@ -24,13 +24,13 @@ function CenterTabBar({ navigation, state }: BottomTabBarProps) {
           width: 56,
           height: 56,
           borderRadius: 28,
-          backgroundColor: activo ? '#FFD942' : '#f1f5f9',
+          backgroundColor: activo ? Paleta.acento : Paleta.fondoSuave,
           borderWidth: activo ? 0 : 1,
-          borderColor: '#e2e8f0',
+          borderColor: Paleta.neutro,
           alignItems: 'center',
           justifyContent: 'center',
         }}>
-        <MaterialIcons name={icono} size={28} color={activo ? '#1a1a1a' : '#64748b'} />
+        <MaterialIcons name={icono} size={28} color={activo ? Paleta.principal : Paleta.neutro} />
       </Pressable>
     );
   };
@@ -38,9 +38,9 @@ function CenterTabBar({ navigation, state }: BottomTabBarProps) {
   return (
     <View
       style={{
-        backgroundColor: '#ffffff',
+        backgroundColor: Paleta.blanco,
         borderTopWidth: 1,
-        borderTopColor: '#e2e8f0',
+        borderTopColor: Paleta.neutro,
         paddingTop: 8,
         paddingBottom: insets.bottom + 8,
         flexDirection: 'row',
@@ -55,9 +55,6 @@ function CenterTabBar({ navigation, state }: BottomTabBarProps) {
 }
 
 export default function TabLayout() {
-  // Se entra a las tabs solo con sesión activa: es el momento de registrar el push token.
-  useEffect(() => { registrarNotificacionesPush(); }, []);
-
   return (
     <Tabs
       tabBar={(props) => <CenterTabBar {...props} />}
