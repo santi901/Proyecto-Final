@@ -1,9 +1,10 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { registrarNotificacionesPush } from '../../lib/notificaciones';
 
 export const unstable_settings = {
   initialRouteName: 'buscar',
@@ -54,6 +55,9 @@ function CenterTabBar({ navigation, state }: BottomTabBarProps) {
 }
 
 export default function TabLayout() {
+  // Se entra a las tabs solo con sesión activa: es el momento de registrar el push token.
+  useEffect(() => { registrarNotificacionesPush(); }, []);
+
   return (
     <Tabs
       tabBar={(props) => <CenterTabBar {...props} />}

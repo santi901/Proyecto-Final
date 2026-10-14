@@ -4,14 +4,9 @@ const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require
 const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
 const { emitirFinTrabajo } = require('../realtime/socket')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en'
 
 const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
-
-// Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí (matching y
-// notificaciones se resolvieron aparte — ver services/matchingService.js y
-// services/notificacionesService.js).
-const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
@@ -427,9 +422,9 @@ async function obtenerCandidatos(req, res) {
   }
 }
 
-// El empleador califica al empleado una vez completado el trabajo (empleados.reputacion
-// se recalcula del lado de Nacho — ver src/calificaciones — así que solo se califica
-// en ese sentido, no al revés).
+// El empleador califica al empleado una vez completado el trabajo. Portado del
+// backend NestJS (src/calificaciones): inserta en 'calificaciones' y recalcula
+// empleados.reputacion (promedio desnormalizado, que es lo que ordena el matching).
 async function calificarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId } = req.usuario
@@ -459,10 +454,7 @@ async function calificarTrabajo(req, res) {
     return res.status(400).json({ error: 'Este trabajo no tiene trabajador asignado' })
   }
 
-  // Un trabajo se califica una sola vez. A diferencia de notificar(), esto NO
-  // es fire-and-forget: si no chequeamos esto acá (y esperamos la respuesta
-  // de Nacho más abajo), no hay forma de que el usuario sepa que su
-  // calificación se perdió o que ya había calificado este trabajo antes.
+  // Un trabajo se califica una sola vez.
   const { data: yaCalificado } = await supabase
     .from('calificaciones').select('id').eq('trabajo_id', trabajoId).maybeSingle()
 
@@ -470,35 +462,65 @@ async function calificarTrabajo(req, res) {
     return res.status(409).json({ error: 'Este trabajo ya fue calificado' })
   }
 
-  let respuestaNacho
-  try {
-    respuestaNacho = await fetch(`${NACHO_API_URL}/calificaciones`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        trabajoId,
-        calificadorId: perfil.id,
-        calificadoId:  trabajo.trabajador_id,
-        puntaje,
-        comentario,
-      }),
+  const { data: calificacion, error } = await supabase
+    .from('calificaciones')
+    .insert({
+      trabajo_id:     trabajoId,
+      calificador_id: perfil.id,
+      calificado_id:  trabajo.trabajador_id,
+      puntaje,
+      comentario:     comentario?.trim() || null,
     })
-  } catch (error) {
-    console.error(`Error mandando calificación (trabajoId=${trabajoId}): ${error.message}`)
-    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+    .select()
+    .single()
+
+  if (error) {
+    console.error(`Error guardando calificación (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
   }
 
-  if (!respuestaNacho.ok) {
-    const detalle = await respuestaNacho.json().catch(() => null)
-    console.error(`Calificación rechazada por Nacho (trabajoId=${trabajoId}): ${respuestaNacho.status} ${detalle?.message ?? ''}`)
-    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+  const reputacion = await recalcularReputacion(trabajo.trabajador_id)
+
+  res.json({ message: 'Calificación enviada', calificacion, reputacion })
+
+  notificarEmpleado(trabajo.trabajador_id, {
+    tipo:    'calificacion',
+    titulo:  'Te calificaron',
+    mensaje: `Recibiste ${puntaje} estrella${puntaje === 1 ? '' : 's'} por tu último trabajo.`,
+    trabajoId,
+  })
+}
+
+async function recalcularReputacion(empleadoId) {
+  const { data, error } = await supabase
+    .from('calificaciones').select('puntaje').eq('calificado_id', empleadoId)
+
+  if (error || !data?.length) {
+    if (error) console.error(`Error recalculando reputación (empleadoId=${empleadoId}): ${error.message ?? error}`)
+    return null
   }
 
-  res.json({ message: 'Calificación enviada' })
+  const promedio = parseFloat((data.reduce((suma, f) => suma + f.puntaje, 0) / data.length).toFixed(2))
+  const { error: errorUpdate } = await supabase.from('empleados').update({ reputacion: promedio }).eq('id', empleadoId)
+  if (errorUpdate) console.error(`Error guardando reputación (empleadoId=${empleadoId}): ${errorUpdate.message ?? errorUpdate}`)
+  return promedio
+}
+
+// GET /api/trabajos/:id/calificacion — para que la app sepa si ya se calificó.
+async function obtenerCalificacion(req, res) {
+  const { id: trabajoId } = req.params
+  const { data, error } = await supabase
+    .from('calificaciones').select('id, puntaje, comentario, creado_en').eq('trabajo_id', trabajoId).maybeSingle()
+
+  if (error) {
+    console.error(`Error obteniendo calificación (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error obteniendo la calificación' })
+  }
+  res.json({ calificacion: data })
 }
 
 module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
-  cancelarTrabajo, obtenerCandidatos,
+  cancelarTrabajo, obtenerCandidatos, obtenerCalificacion,
 }

@@ -22,6 +22,12 @@ import MapaUbicacion from '../../components/mapa-ubicacion';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 
+// Tiempo límite para aceptar (el backend lo fija en 15 min desde la creación y
+// rechaza aceptar después de eso).
+function minutosRestantes(iso: string) {
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 60000);
+}
+
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.82);
 const PEEK = 250; // parte visible del panel cuando está abajo
@@ -342,9 +348,16 @@ export default function BuscarTrabajoScreen() {
                   <Text className="text-[13px] text-[#64748b] mb-2">
                     {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''}
                   </Text>
-                  <Text className="text-sm text-[#475569] mb-3" numberOfLines={2}>
+                  <Text className="text-sm text-[#475569] mb-2" numberOfLines={2}>
                     {t.descripcion}
                   </Text>
+                  {!!t.solicitud_expira_en && (
+                    <Text className="text-[12px] text-[#b9770e] mb-3">
+                      {minutosRestantes(t.solicitud_expira_en) > 0
+                        ? `La solicitud vence en ${minutosRestantes(t.solicitud_expira_en)} min`
+                        : 'La solicitud está por vencer'}
+                    </Text>
+                  )}
                   <Pressable
                     onPress={() => handleAceptar(t.id)}
                     disabled={aceptandoId === t.id}

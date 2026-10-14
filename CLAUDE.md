@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is the **ChanguitApp** monorepo (school project). It contains three independently-versioned projects glued together in one repo, built by different people and merged in later — they do **not** share dependencies, `node_modules`, or a common package.json, and each has its own environment config:
 
 - **Root (`/src`, `/prisma`, `/test`)** — NestJS backend, referred to in code comments as "el backend de Nacho/Ignacio". Originally handled identity verification and location/distance features; **as of 2026-07, both apps no longer call it** — that functionality was reimplemented in `backend/` (see below) and the two apps now talk to a single backend. This project is kept in the repo but is not wired to either Expo app anymore; don't assume its code is what actually runs in production.
-- **`backend/`** — Express/CommonJS backend ("el backend de Nico"). Handles auth, users, the jobs (`trabajos`) lifecycle (including PIN validation, cancellation, automatic reassignment, and dual-confirmation completion), **and now also identity verification, location/distance, and worker matching** (ported from the NestJS project above) plus real-time location sharing over WebSocket and an ephemeral Redis location cache. This is the only backend either Expo app talks to; the NestJS project below is only still reached by `backend/` for push notifications and calificaciones. See [backend/CLAUDE.md](backend/CLAUDE.md) for its full architecture — read that file before working in `backend/`.
+- **`backend/`** — Express/CommonJS backend ("el backend de Nico"). Handles auth, users, the jobs (`trabajos`) lifecycle (including PIN validation, cancellation, automatic reassignment, and dual-confirmation completion), **and now also identity verification, location/distance, and worker matching** (ported from the NestJS project above) plus real-time location sharing over WebSocket and an ephemeral Redis location cache. This is the only backend either Expo app talks to, and it no longer calls the NestJS project for anything (notificaciones, calificaciones and evidencia were ported too). See [backend/CLAUDE.md](backend/CLAUDE.md) for its full architecture — read that file before working in `backend/`.
 - **`AppEmployee/`** and **`AppEmployer/`** — two near-identical Expo/React Native apps (worker-facing and employer-facing clients), each with its own `package.json`.
 
 ## Commands
@@ -66,7 +66,7 @@ Both routes are unauthenticated at the Nest layer — no guards are registered o
 
 ### Notificaciones (`src/notificaciones`)
 
-`POST /notificaciones` sends an Expo push notification and always logs it to the `notificaciones` table first as `'pendiente'`, then updates the row to `'enviado'`/`'fallido'` after attempting the push — so a row exists even if the push itself fails or the recipient never registered a token. `POST /notificaciones/registrar-token` upserts an Expo push token into `push_tokens` keyed by `usuario_id`. `GET /notificaciones?destinatarioId=` lists a user's notification history, most recent first. No app currently installs `expo-notifications` or calls `registrar-token`, so pushes are logged but never actually delivered end-to-end yet.
+`POST /notificaciones` sends an Expo push notification and always logs it to the `notificaciones` table first as `'pendiente'`, then updates the row to `'enviado'`/`'fallido'` after attempting the push — so a row exists even if the push itself fails or the recipient never registered a token. `POST /notificaciones/registrar-token` upserts an Expo push token into `push_tokens` keyed by `usuario_id`. `GET /notificaciones?destinatarioId=` lists a user's notification history, most recent first. Unused now: the apps register their push token against `backend/`'s `/api/notificaciones/registrar-token`, and `backend/` sends pushes itself.
 
 ### Evidencia (`src/evidencia`)
 
@@ -87,6 +87,8 @@ Reads from `.env` via `ConfigModule.forRoot({ isGlobal: true })`: `PORT`, `AWS_A
 Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` recommendedTypeChecked + `eslint-plugin-prettier`; `@typescript-eslint/no-explicit-any` is off, `no-floating-promises`/`no-unsafe-argument` are warnings not errors. Prettier: single quotes, trailing commas everywhere (`.prettierrc`).
 
 ## Expo apps (`AppEmployee/`, `AppEmployer/`)
+
+Both apps share an identical `app/trabajo/[id].tsx` detail screen (opened from each app's `(tabs)/explore.tsx` list) that adapts by `usuario.tipo`: chat (polls every 5s while `en_progreso`, read-only history after), evidence photos (empleado uploads via `expo-image-picker`, empleador views), rating (empleador, once `completado`) and start/end/duration. `lib/notificaciones.ts` registers the Expo push token from `(tabs)/_layout.tsx`; it needs an EAS `projectId` in `app.json` (`eas init`) and a physical device / dev build — without those it just logs and skips.
 
 Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the `(tabs)` screens:
 - `AppEmployee`: `buscar.tsx`, `dashboard.tsx` — worker searches for jobs.

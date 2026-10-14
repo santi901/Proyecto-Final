@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { misTrabajosPublicados, obtenerPinLocal, completarTrabajo, type Trabajo } from '../../lib/trabajos';
+import { misTrabajosPublicados, obtenerPinLocal, completarTrabajo, cancelarTrabajo, type Trabajo } from '../../lib/trabajos';
 import { alertaSimple } from '../../lib/alerta';
 
 const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
@@ -10,6 +11,7 @@ const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
   asignado: 'Asignado',
   en_progreso: 'En progreso',
   completado: 'Completado',
+  cancelado: 'Cancelado',
 };
 
 const ESTADO_COLOR: Record<Trabajo['estado'], string> = {
@@ -17,6 +19,7 @@ const ESTADO_COLOR: Record<Trabajo['estado'], string> = {
   asignado: '#0a7ea4',
   en_progreso: '#1d8348',
   completado: '#64748b',
+  cancelado: '#e74c3c',
 };
 
 // El PIN solo tiene sentido mostrarlo mientras el trabajo todavía no arrancó
@@ -25,11 +28,15 @@ const ESTADOS_CON_PIN: Trabajo['estado'][] = ['pendiente', 'asignado'];
 
 export default function MisTrabajosScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [trabajos, setTrabajos] = useState<Trabajo[] | null>(null);
   const [error, setError] = useState('');
   const [pins, setPins] = useState<Record<string, string | null>>({});
   const [pinVisible, setPinVisible] = useState<Record<string, boolean>>({});
   const [completandoId, setCompletandoId] = useState<string | null>(null);
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null);
+  // Sin confirm() en web ni Alert con botones cross-platform: se pide un segundo toque.
+  const [confirmarCancelarId, setConfirmarCancelarId] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError('');
@@ -55,13 +62,31 @@ export default function MisTrabajosScreen() {
   async function handleCompletar(id: string) {
     setCompletandoId(id);
     try {
-      const { message } = await completarTrabajo(id);
-      alertaSimple('Trabajo completado', message);
+      const { message, esperandoConfirmacion } = await completarTrabajo(id);
+      alertaSimple(esperandoConfirmacion ? 'Confirmación enviada' : 'Trabajo completado', message);
       cargar();
     } catch (e: any) {
       alertaSimple('No se pudo completar', e.message || 'Intentá de nuevo.');
     } finally {
       setCompletandoId(null);
+    }
+  }
+
+  async function handleCancelar(id: string) {
+    if (confirmarCancelarId !== id) {
+      setConfirmarCancelarId(id);
+      return;
+    }
+    setConfirmarCancelarId(null);
+    setCancelandoId(id);
+    try {
+      const { message } = await cancelarTrabajo(id);
+      alertaSimple('Trabajo cancelado', message);
+      cargar();
+    } catch (e: any) {
+      alertaSimple('No se pudo cancelar', e.message || 'Intentá de nuevo.');
+    } finally {
+      setCancelandoId(null);
     }
   }
 
@@ -131,7 +156,32 @@ export default function MisTrabajosScreen() {
                 )
               )}
 
-              {t.estado === 'en_progreso' && (
+              {(t.estado === 'pendiente' || t.estado === 'asignado') && (
+                <Pressable
+                  onPress={() => handleCancelar(t.id)}
+                  disabled={cancelandoId === t.id}
+                  className={`rounded-lg py-2.5 items-center mt-2 border ${
+                    confirmarCancelarId === t.id ? 'bg-[#e74c3c] border-[#e74c3c]' : 'border-[#e74c3c] active:opacity-70'
+                  }`}>
+                  {cancelandoId === t.id ? (
+                    <ActivityIndicator color="#e74c3c" size="small" />
+                  ) : (
+                    <Text className={`text-sm font-semibold ${confirmarCancelarId === t.id ? 'text-white' : 'text-[#e74c3c]'}`}>
+                      {confirmarCancelarId === t.id ? 'Tocá de nuevo para confirmar' : 'Cancelar trabajo'}
+                    </Text>
+                  )}
+                </Pressable>
+              )}
+
+              {t.estado === 'en_progreso' && t.confirmado_empleador_en && (
+                <View className="bg-[#fff8da] rounded-lg py-2.5 px-3 items-center">
+                  <Text className="text-[#1a1a1a] text-[13px] text-center">
+                    Ya confirmaste que terminó. Esperando que confirme el trabajador.
+                  </Text>
+                </View>
+              )}
+
+              {t.estado === 'en_progreso' && !t.confirmado_empleador_en && (
                 <Pressable
                   onPress={() => handleCompletar(t.id)}
                   disabled={completandoId === t.id}
@@ -143,6 +193,17 @@ export default function MisTrabajosScreen() {
                   ) : (
                     <Text className="text-white text-sm font-extrabold">Marcar como completado</Text>
                   )}
+                </Pressable>
+              )}
+
+              {(t.estado === 'en_progreso' || t.estado === 'completado') && (
+                <Pressable
+                  onPress={() => router.push({ pathname: '/trabajo/[id]', params: { id: t.id } })}
+                  className="flex-row items-center justify-center rounded-lg py-2.5 mt-2 border border-[#e2e8f0] active:opacity-70">
+                  <MaterialIcons name={t.estado === 'en_progreso' ? 'chat-bubble-outline' : 'receipt-long'} size={18} color="#475569" />
+                  <Text className="text-[#475569] text-sm font-semibold ml-1.5">
+                    {t.estado === 'en_progreso' ? 'Chat y evidencia' : 'Ver evidencia y calificar'}
+                  </Text>
                 </Pressable>
               )}
             </View>

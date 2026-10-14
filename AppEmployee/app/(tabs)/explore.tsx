@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { misTrabajosAsignados, validarPin, completarTrabajo, type Trabajo } from '../../lib/trabajos';
 import { alertaSimple } from '../../lib/alerta';
@@ -10,6 +11,7 @@ const ESTADO_LABEL: Record<Trabajo['estado'], string> = {
   asignado: 'Asignado',
   en_progreso: 'En progreso',
   completado: 'Completado',
+  cancelado: 'Cancelado',
 };
 
 const ESTADO_COLOR: Record<Trabajo['estado'], string> = {
@@ -17,10 +19,12 @@ const ESTADO_COLOR: Record<Trabajo['estado'], string> = {
   asignado: '#0a7ea4',
   en_progreso: '#1d8348',
   completado: '#64748b',
+  cancelado: '#e74c3c',
 };
 
 export default function MiTrabajoScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [trabajos, setTrabajos] = useState<Trabajo[] | null>(null);
   const [error, setError] = useState('');
   const [pinInputs, setPinInputs] = useState<Record<string, string>>({});
@@ -64,8 +68,8 @@ export default function MiTrabajoScreen() {
   async function handleCompletar(id: string) {
     setCompletandoId(id);
     try {
-      const { message } = await completarTrabajo(id);
-      alertaSimple('Trabajo completado', message);
+      const { message, esperandoConfirmacion } = await completarTrabajo(id);
+      alertaSimple(esperandoConfirmacion ? 'Confirmación enviada' : 'Trabajo completado', message);
       cargar();
     } catch (e: any) {
       alertaSimple('No se pudo completar', e.message || 'Intentá de nuevo.');
@@ -147,7 +151,15 @@ export default function MiTrabajoScreen() {
               </View>
             )}
 
-            {t.estado === 'en_progreso' && (
+            {t.estado === 'en_progreso' && t.confirmado_empleado_en && (
+              <View className="bg-[#fff8da] rounded-lg py-2.5 px-3 items-center">
+                <Text className="text-[#1a1a1a] text-[13px] text-center">
+                  Ya confirmaste que terminó. Esperando que confirme el empleador.
+                </Text>
+              </View>
+            )}
+
+            {t.estado === 'en_progreso' && !t.confirmado_empleado_en && (
               <Pressable
                 onPress={() => handleCompletar(t.id)}
                 disabled={completandoId === t.id}
@@ -159,6 +171,17 @@ export default function MiTrabajoScreen() {
                 ) : (
                   <Text className="text-white text-sm font-extrabold">Marcar como completado</Text>
                 )}
+              </Pressable>
+            )}
+
+            {t.estado !== 'pendiente' && t.estado !== 'asignado' && (
+              <Pressable
+                onPress={() => router.push({ pathname: '/trabajo/[id]', params: { id: t.id } })}
+                className="flex-row items-center justify-center rounded-lg py-2.5 mt-2 border border-[#e2e8f0] active:opacity-70">
+                <MaterialIcons name={t.estado === 'en_progreso' ? 'chat-bubble-outline' : 'receipt-long'} size={18} color="#475569" />
+                <Text className="text-[#475569] text-sm font-semibold ml-1.5">
+                  {t.estado === 'en_progreso' ? 'Chat y foto de evidencia' : 'Ver detalle'}
+                </Text>
               </Pressable>
             )}
           </View>

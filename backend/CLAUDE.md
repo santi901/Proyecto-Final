@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository context
 
-This `backend/` folder is one part of the `Proyecto-Final` monorepo (ChanguitApp). It is a **separate Node/Express API** from the NestJS project at the monorepo root (`../src`, `../prisma`) — mostly unrelated codebases that happen to share a repo, except that `backend/` still makes one server-to-server HTTP call to the NestJS project for push notifications and calificaciones (see `services/notificacionesService.js` and `calificarTrabajo`) — everything else (verificación, ubicación, matching) has been ported over and no longer calls it. There are also two Expo apps at the monorepo root, `AppEmployee/` and `AppEmployer/`. Do not mix dependencies or assumptions between this folder and the rest of the repo; treat `backend/` as its own Node project with its own `package.json` and `node_modules`.
+This `backend/` folder is one part of the `Proyecto-Final` monorepo (ChanguitApp). It is a **separate Node/Express API** from the NestJS project at the monorepo root (`../src`, `../prisma`) — unrelated codebases that happen to share a repo. Everything the NestJS project used to do (verificación, ubicación, matching, notificaciones, calificaciones, evidencia) has been ported into `backend/`, which makes **no** HTTP calls to it anymore. There are also two Expo apps at the monorepo root, `AppEmployee/` and `AppEmployer/`. Do not mix dependencies or assumptions between this folder and the rest of the repo; treat `backend/` as its own Node project with its own `package.json` and `node_modules`.
 
 ## Commands
 
@@ -17,7 +17,7 @@ There is no build step (plain CommonJS, no TypeScript/transpilation), no test su
 
 The server reads config from a `.env` file (not committed) with these keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, and optionally `REDIS_URL` (defaults to `redis://127.0.0.1:6379`; if Redis isn't reachable the app logs one warning and keeps running — see "Redis" below).
 
-Schema changes live as plain SQL files in `backend/migrations/`, run by hand against the Supabase project (no migration tooling/CLI wired up) — e.g. `001_trabajos_sprint3_sprint4.sql` adds the columns the cancel/reassignment/dual-confirmation flow below needs.
+Schema changes live as plain SQL files in `backend/migrations/`, run by hand against the Supabase project (no migration tooling/CLI wired up) — `001_trabajos_sprint3_sprint4.sql` adds the columns the cancel/reassignment/dual-confirmation flow below needs; `002_chat_evidencia_notificaciones_calificaciones.sql` creates (IF NOT EXISTS) `mensajes_chat`, `evidencias_trabajo`, `notificaciones`, `push_tokens`, `calificaciones` and the timing columns on `trabajos`. Run them in order.
 
 ## Architecture
 
@@ -30,8 +30,8 @@ src/routes/*.js                       one router per resource, wires middleware 
 src/controllers/*.js                  request handling + all Supabase queries for that resource
 src/services/matchingService.js       worker matching by category/radius/availability/reputation (ported from
                                        the NestJS project's src/matching)
-src/services/notificacionesService.js push-notification helpers (still call the NestJS project by HTTP) +
-                                       notificarNuevoTrabajo, which now uses matchingService locally
+src/services/notificacionesService.js logs every notification to `notificaciones`, then sends an Expo push
+                                       (plain HTTP to exp.host) to the token in `push_tokens`; notificarNuevoTrabajo
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
 src/jobs/reasignarTrabajos.js         in-process poller: retries/auto-cancels 'pendiente' trabajos nobody accepted
@@ -40,7 +40,7 @@ src/middleware/errorHandler.js        catch-all error handler (last app.use in s
 src/utils/jwt.js                      access/refresh token sign+verify (separate secrets/expiries)
 src/utils/pin.js                      6-digit job-start PIN generation + bcrypt hash/compare
 src/utils/participantes.js            esParticipanteTrabajo — shared by the chat and by the socket room-join check
-src/utils/storage.js                  uploads a buffer to S3, returns the object key
+src/utils/storage.js                  S3 upload (returns the key) + 1h presigned GET URL (bucket is private)
 src/utils/haversine.js                great-circle distance in km between two lat/lng points
 src/config/redis.js                   ioredis client, lazy-connects, degrades silently if unreachable
 migrations/*.sql                      schema changes, run by hand against Supabase
@@ -88,6 +88,13 @@ Ported from the NestJS project's `src/matching/matching.service.ts` (same algori
 ### Realtime (`src/realtime/socket.js`)
 
 `socket.io` (already a dependency, previously unused) is attached to the same `http.Server` as Express in `server.js`. Connections authenticate with the same JWT access token as the REST API (`socket.handshake.auth.token`, verified with `verificarAccessToken`). Clients join a per-trabajo room by emitting `unirse-trabajo { trabajoId }`, gated by `esParticipanteTrabajo` (the empleado/empleador must actually be part of that trabajo — same check the chat uses). `ubicacionController.actualizarUbicacion` emits `ubicacion-trabajador` into that room while the job is active; `completarTrabajo` (once both parties confirmed) and `cancelarTrabajo` emit `trabajo-finalizado` and force everyone out of the room (`io.socketsLeave`), which is what stops further location updates from reaching clients once a job ends.
+
+### Chat, evidencia, calificación, notificaciones
+
+- **Chat** (`mensajesController.js`): `POST/GET /api/trabajos/:id/mensajes`, participants only (`esParticipanteTrabajo`). Sending is allowed only while `estado === 'en_progreso'`; listing keeps working afterwards as history.
+- **Evidencia** (`evidenciaController.js`): `POST /api/trabajos/:id/evidencia` (multipart field `foto`, 10MB max, assigned `empleado` only, job `en_progreso`/`completado`) uploads to S3 under `{trabajoId}/evidencia-*.jpg` and inserts into `evidencias_trabajo`; `GET` (either participant) returns each row with a presigned `url`. Uploading notifies the empleador.
+- **Calificación** (`calificarTrabajo`): `POST /api/trabajos/:id/calificar` (empleador-owner, job `completado`, once per job — 409 otherwise) inserts into `calificaciones` and recalculates `empleados.reputacion` (average, what matching sorts by). `GET /:id/calificacion` returns it or `null`.
+- **Notificaciones** (`routes/notificaciones.js`): `POST /api/notificaciones/registrar-token` (apps call it on entering the tabs, via `expo-notifications`) upserts into `push_tokens`; `GET /api/notificaciones` lists the caller's history. `notificar()` never throws — a row is always written (`pendiente` → `enviado`/`fallido`) even if there's no token or Expo rejects the push.
 
 ### Redis (`src/config/redis.js`)
 
