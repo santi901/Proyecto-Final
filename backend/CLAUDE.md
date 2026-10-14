@@ -91,7 +91,7 @@ Ported from the NestJS project's `src/matching/matching.service.ts` (same algori
 
 ### Chat, evidencia, calificación, notificaciones
 
-- **Chat** (`mensajesController.js`): `POST/GET /api/trabajos/:id/mensajes`, participants only (`esParticipanteTrabajo`). Sending is allowed only while `estado === 'en_progreso'`; listing keeps working afterwards as history.
+- **Chat** (`mensajesController.js`): `POST/GET /api/trabajos/:id/mensajes`, participants only (`esParticipanteTrabajo`). Sending is allowed from the moment someone accepts (`asignado`) through `en_progreso`; listing keeps working afterwards as history.
 - **Evidencia** (`evidenciaController.js`): `POST /api/trabajos/:id/evidencia` (multipart field `foto`, 10MB max, assigned `empleado` only, job `en_progreso`/`completado`) uploads to S3 under `{trabajoId}/evidencia-*.jpg` and inserts into `evidencias_trabajo`; `GET` (either participant) returns each row with a presigned `url`. Uploading notifies the empleador.
 - **Calificación** (`calificarTrabajo`): `POST /api/trabajos/:id/calificar` (empleador-owner, job `completado`, once per job — 409 otherwise) inserts into `calificaciones` and recalculates `empleados.reputacion` (average, what matching sorts by). `GET /:id/calificacion` returns it or `null`.
 - **Notificaciones** (`routes/notificaciones.js`): `POST /api/notificaciones/registrar-token` (apps call it on entering the tabs, via `expo-notifications`) upserts into `push_tokens`; `GET /api/notificaciones` lists the caller's history. `notificar()` never throws — a row is always written (`pendiente` → `enviado`/`fallido`) even if there's no token or Expo rejects the push.

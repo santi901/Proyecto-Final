@@ -126,8 +126,9 @@ export default function DetalleTrabajoScreen() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  // Mientras el trabajo está activo, el chat se refresca solo cada 5s.
-  const chatActivo = trabajo?.estado === 'en_progreso';
+  // Desde que alguien acepta (asignado) hasta que termina, el chat está abierto
+  // y se refresca solo cada 5s.
+  const chatActivo = trabajo?.estado === 'asignado' || trabajo?.estado === 'en_progreso';
   useEffect(() => {
     if (!chatActivo) return;
     const intervalo = setInterval(cargarMensajes, CHAT_POLL_MS);
@@ -375,7 +376,7 @@ export default function DetalleTrabajoScreen() {
                 ? 'Todavía no hay mensajes.'
                 : trabajo.estado === 'completado' || trabajo.estado === 'cancelado'
                 ? 'No hubo mensajes en este trabajo.'
-                : 'El chat se habilita cuando el trabajo arranca (al validar el PIN).'}
+                : 'El chat se habilita cuando alguien acepta el trabajo.'}
             </Text>
           ) : (
             mensajes.map(m => {

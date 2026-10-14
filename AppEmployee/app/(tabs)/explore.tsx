@@ -174,13 +174,13 @@ export default function MiTrabajoScreen() {
               </Pressable>
             )}
 
-            {t.estado !== 'pendiente' && t.estado !== 'asignado' && (
+            {t.estado !== 'pendiente' && (
               <Pressable
                 onPress={() => router.push({ pathname: '/trabajo/[id]', params: { id: t.id } })}
                 className="flex-row items-center justify-center rounded-lg py-2.5 mt-2 border border-[#e2e8f0] active:opacity-70">
                 <MaterialIcons name={t.estado === 'en_progreso' ? 'chat-bubble-outline' : 'receipt-long'} size={18} color="#475569" />
                 <Text className="text-[#475569] text-sm font-semibold ml-1.5">
-                  {t.estado === 'en_progreso' ? 'Chat y foto de evidencia' : 'Ver detalle'}
+                  {t.estado === 'en_progreso' ? 'Chat y foto de evidencia' : t.estado === 'asignado' ? 'Chat con el empleador' : 'Ver detalle'}
                 </Text>
               </Pressable>
             )}

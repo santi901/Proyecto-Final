@@ -88,7 +88,7 @@ Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` 
 
 ## Expo apps (`AppEmployee/`, `AppEmployer/`)
 
-Both apps share an identical `app/trabajo/[id].tsx` detail screen (opened from each app's `(tabs)/explore.tsx` list) that adapts by `usuario.tipo`: chat (polls every 5s while `en_progreso`, read-only history after), evidence photos (empleado uploads via `expo-image-picker`, empleador views), rating (empleador, once `completado`) and start/end/duration. `lib/notificaciones.ts` registers the Expo push token from `(tabs)/_layout.tsx`; it needs an EAS `projectId` in `app.json` (`eas init`) and a physical device / dev build — without those it just logs and skips.
+Both apps share an identical `app/trabajo/[id].tsx` detail screen (opened from each app's `(tabs)/explore.tsx` list) that adapts by `usuario.tipo`: chat (open and polling every 5s from `asignado` through `en_progreso`, read-only history after), evidence photos (empleado uploads via `expo-image-picker`, empleador views), rating (empleador, once `completado`) and start/end/duration. `lib/notificaciones.ts` registers the Expo push token from `(tabs)/_layout.tsx`; it needs an EAS `projectId` in `app.json` (`eas init`) and a physical device / dev build — without those it just logs and skips.
 
 Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the `(tabs)` screens:
 - `AppEmployee`: `buscar.tsx`, `dashboard.tsx` — worker searches for jobs.

@@ -196,13 +196,13 @@ export default function MisTrabajosScreen() {
                 </Pressable>
               )}
 
-              {(t.estado === 'en_progreso' || t.estado === 'completado') && (
+              {(t.estado === 'asignado' || t.estado === 'en_progreso' || t.estado === 'completado') && (
                 <Pressable
                   onPress={() => router.push({ pathname: '/trabajo/[id]', params: { id: t.id } })}
                   className="flex-row items-center justify-center rounded-lg py-2.5 mt-2 border border-[#e2e8f0] active:opacity-70">
                   <MaterialIcons name={t.estado === 'en_progreso' ? 'chat-bubble-outline' : 'receipt-long'} size={18} color="#475569" />
                   <Text className="text-[#475569] text-sm font-semibold ml-1.5">
-                    {t.estado === 'en_progreso' ? 'Chat y evidencia' : 'Ver evidencia y calificar'}
+                    {t.estado === 'en_progreso' ? 'Chat y evidencia' : t.estado === 'asignado' ? 'Chat con el trabajador' : 'Ver evidencia y calificar'}
                   </Text>
                 </Pressable>
               )}
