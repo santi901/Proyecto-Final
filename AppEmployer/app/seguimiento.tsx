@@ -26,6 +26,8 @@ import {
 } from '../lib/trabajos';
 import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
 import { obtenerUbicacionTrabajador, type Coordenadas } from '../lib/ubicacion';
+import { EstrellasLectura } from '../components/tarjeta-reputacion';
+import { formatearPuntaje } from '../lib/reputacion';
 import { Paleta, sombra } from '@/constants/theme';
 
 function fechaCorta(iso: string) {
@@ -100,8 +102,9 @@ export default function SeguimientoScreen() {
   const { trabajoId } = useLocalSearchParams<{ trabajoId: string }>();
 
   const [trabajo, setTrabajo] = useState<Trabajo | null>(null);
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState('');
+  // Sin trabajoId no hay nada que cargar: el error se conoce desde el primer render.
+  const [cargando, setCargando] = useState(!!trabajoId);
+  const [error, setError] = useState(trabajoId ? '' : 'No se recibió el trabajo.');
 
   const [pinDelTrabajo, setPinDelTrabajo] = useState<string | null>(null);
   const [pinIngresado, setPinIngresado] = useState('');
@@ -151,7 +154,7 @@ export default function SeguimientoScreen() {
   const [ahora, setAhora] = useState(0);
 
   useEffect(() => {
-    if (!trabajoId) { setError('No se recibió el trabajo.'); setCargando(false); return; }
+    if (!trabajoId) return;
 
     let activo = true;
 
@@ -483,6 +486,40 @@ export default function SeguimientoScreen() {
             <MaterialIcons name="timer-off" size={18} color={Paleta.neutro} />
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
               La solicitud expiró sin que nadie la acepte. Podés publicar el trabajo de nuevo.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Quién tomó el trabajo y su reputación (Sprint 5) */}
+        {trabajo.trabajador && (trabajo.estado === 'asignado' || enProgreso) ? (
+          <View style={sombra(Paleta.neutro)} className="bg-white rounded-xl p-4 mb-5">
+            <Text className="text-neutro text-xs font-nunito mb-1">Trabajador</Text>
+            <Text className="text-principal text-base font-nunito-bold mb-2">
+              {trabajo.trabajador.nombre} {trabajo.trabajador.apellido}
+            </Text>
+            {trabajo.trabajador.reputacion ? (
+              <View className="flex-row items-center">
+                <View className="bg-principal rounded-full px-2.5 py-1 mr-2.5">
+                  <Text className="text-acento text-sm font-nunito-bold">
+                    {formatearPuntaje(trabajo.trabajador.reputacion.score)}
+                  </Text>
+                </View>
+                <EstrellasLectura valor={trabajo.trabajador.reputacion.promedio ?? 0} tamano={16} />
+                <Text className="text-neutro text-xs font-nunito ml-2 flex-1">
+                  {trabajo.trabajador.reputacion.cantidadCalificaciones
+                    ? `${trabajo.trabajador.reputacion.cantidadCalificaciones} calificaciones · ${trabajo.trabajador.reputacion.trabajosCompletados} trabajos`
+                    : 'Trabajador nuevo, sin calificaciones'}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {cancelado && trabajo.cancelado_por === 'empleado' ? (
+          <View style={sombra(Paleta.neutro)} className="flex-row items-center bg-fondo-suave rounded-xl px-4 py-3 mb-5">
+            <MaterialIcons name="person-off" size={18} color={Paleta.error} />
+            <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
+              El trabajador canceló antes de empezar. Podés publicar el trabajo de nuevo.
             </Text>
           </View>
         ) : null}

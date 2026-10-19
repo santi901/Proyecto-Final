@@ -34,8 +34,12 @@ function proximoPaso(t: Trabajo): string {
   }
   if (t.estado === 'asignado') return 'El trabajador va en camino. Dictale el PIN cuando llegue.';
   if (t.estado === 'en_progreso') return 'Trabajo en curso.';
-  // El backend cancela solo los trabajos que nadie acepta después de 3 reintentos.
-  if (t.estado === 'cancelado') return 'Este trabajo se canceló. Podés volver a publicarlo.';
+  if (t.estado === 'cancelado') {
+    if (t.cancelado_por === 'empleado') return 'El trabajador lo canceló. Podés volver a publicarlo.';
+    // El backend cancela solo los trabajos que nadie acepta después de 3 reintentos.
+    if (t.cancelado_por === 'sistema') return 'Nadie lo aceptó a tiempo. Podés volver a publicarlo.';
+    return 'Cancelaste este trabajo.';
+  }
   return 'Tocá para ver la foto y calificar al trabajador.';
 }
 

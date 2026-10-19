@@ -89,8 +89,9 @@ Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` 
 ## Expo apps (`AppEmployee/`, `AppEmployer/`)
 
 Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the screens:
-- `AppEmployee`: `(tabs)/buscar.tsx`, `(tabs)/dashboard.tsx` — worker searches for jobs; `trabajo-en-curso.tsx` (PIN, evidence photo upload, completion), `perfil.tsx`.
-- `AppEmployer`: `(tabs)/ofrecer.tsx`, `(tabs)/dashboard.tsx` — employer posts jobs; `seguimiento.tsx` (live tracking, evidence photos, cancel, rating).
+- `AppEmployee`: `(tabs)/buscar.tsx` — worker searches for jobs; `trabajo-en-curso.tsx` (PIN, cancel before starting, evidence photo upload, completion), `perfil.tsx` (profile + reputation card).
+- `AppEmployer`: `(tabs)/ofrecer.tsx` — employer posts jobs; `seguimiento.tsx` (live tracking, assigned worker + reputation, evidence photos, cancel, rating).
+- Both: `(tabs)/historial.tsx` (identical file, adapts by `usuario.tipo`: job history with state/date/duration/earnings + totals, via `lib/historial.ts`), `components/tarjeta-reputacion.tsx` and `lib/reputacion.ts` (also identical).
 - Both: `chat.tsx` (opened from `components/boton-chat.tsx`) — writable from `asignado` through `en_progreso`, read-only history after.
 
 Both apps talk to a **single backend** — `backend/` (Express) — via one base URL:

@@ -3,10 +3,16 @@ const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
 const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
 const { emitirFinTrabajo } = require('../realtime/socket')
+const { obtenerReputacion, actualizarReputacion } = require('../services/reputacionService')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en, cancelado_por'
 
 const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
+
+const MAX_LARGO_COMENTARIO = 500
+
+// Columnas que necesita el historial (Sprint 5): estado, fechas, duración y monto.
+const CAMPOS_HISTORIAL = 'id, titulo, categoria, estado, precio, creado_en, iniciado_en, finalizado_en, cancelado_en, cancelado_por'
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
@@ -141,6 +147,7 @@ async function misTrabajos(req, res) {
 
 async function obtenerTrabajo(req, res) {
   const { id: trabajoId } = req.params
+  const { tipo } = req.usuario
 
   const { data: trabajo } = await supabase
     .from('trabajos')
@@ -151,7 +158,22 @@ async function obtenerTrabajo(req, res) {
 
   const duracionSegundos = calcularDuracionSegundos(trabajo)
 
-  res.json({ trabajo: { ...trabajo, duracionSegundos } })
+  // Sprint 5: el empleador ve el nombre y la reputación del trabajador que lo tomó.
+  let trabajador = null
+  if (tipo === 'empleador' && trabajo.trabajador_id) {
+    const { data: empleado } = await supabase
+      .from('empleados').select('id, nombre, apellido, foto_url').eq('id', trabajo.trabajador_id).maybeSingle()
+    if (empleado) {
+      try {
+        const { promedio, score, cantidadCalificaciones, trabajosCompletados } = await obtenerReputacion(empleado.id)
+        trabajador = { ...empleado, reputacion: { promedio, score, cantidadCalificaciones, trabajosCompletados } }
+      } catch {
+        trabajador = { ...empleado, reputacion: null }
+      }
+    }
+  }
+
+  res.json({ trabajo: { ...trabajo, duracionSegundos, trabajador } })
 }
 
 async function aceptarTrabajo(req, res) {
@@ -343,32 +365,46 @@ async function completarTrabajo(req, res) {
 // se validó el PIN (en_progreso) ya no se puede cancelar por acá.
 async function cancelarTrabajo(req, res) {
   const { id: trabajoId } = req.params
-  const { id: usuarioId } = req.usuario
-  const { motivo } = req.body
-
-  const { data: perfil } = await supabase
-    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
-
-  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+  const { id: usuarioId, tipo } = req.usuario
+  const { motivo } = req.body ?? {}
 
   const { data: trabajo } = await supabase
-    .from('trabajos').select('id, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
+    .from('trabajos').select('id, titulo, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
-  if (trabajo.empleador_id !== perfil.id) {
-    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
-    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
-  }
-  if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
-    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
-    return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+
+  if (tipo === 'empleado') {
+    // Sprint 5: el trabajador puede bajarse de un trabajo que aceptó, pero solo antes
+    // de arrancarlo (asignado). Cuenta para su tasa de cancelación (reputacionService).
+    const { data: empleado } = await supabase
+      .from('empleados').select('id').eq('user_id', usuarioId).maybeSingle()
+    if (!empleado || trabajo.trabajador_id !== empleado.id) {
+      console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleado asignado.`)
+      return res.status(403).json({ error: 'No tenés asignado este trabajo' })
+    }
+    if (trabajo.estado !== 'asignado') {
+      console.error(`Cancelación de empleado rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}'.`)
+      return res.status(409).json({ error: 'Solo podés cancelar un trabajo antes de empezarlo' })
+    }
+  } else {
+    const { data: perfil } = await supabase
+      .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+    if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+    if (trabajo.empleador_id !== perfil.id) {
+      console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+      return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+    }
+    if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
+      console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
+      return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+    }
   }
 
   const { error } = await supabase
     .from('trabajos')
     .update({
       estado: 'cancelado',
-      cancelado_por: 'empleador',
+      cancelado_por: tipo === 'empleado' ? 'empleado' : 'empleador',
       cancelado_en: new Date().toISOString(),
       motivo_cancelacion: motivo ?? null,
     })
@@ -383,7 +419,14 @@ async function cancelarTrabajo(req, res) {
 
   emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
 
-  if (trabajo.trabajador_id) {
+  if (tipo === 'empleado') {
+    notificarEmpleador(trabajo.empleador_id, {
+      tipo:    'cambio_estado',
+      titulo:  'El trabajador canceló',
+      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}". Podés volver a publicarlo.`,
+      trabajoId,
+    })
+  } else if (trabajo.trabajador_id) {
     notificarEmpleado(trabajo.trabajador_id, {
       tipo:    'cambio_estado',
       titulo:  'Trabajo cancelado',
@@ -431,7 +474,16 @@ async function calificarTrabajo(req, res) {
   const { puntaje, comentario } = req.body
 
   if (!Number.isInteger(puntaje) || puntaje < 1 || puntaje > 5) {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): puntaje inválido ${JSON.stringify(puntaje)}.`)
     return res.status(400).json({ error: 'El puntaje debe ser un entero entre 1 y 5' })
+  }
+  if (comentario != null && typeof comentario !== 'string') {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): comentario no es texto.`)
+    return res.status(400).json({ error: 'El comentario tiene que ser texto' })
+  }
+  if (comentario && comentario.trim().length > MAX_LARGO_COMENTARIO) {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): comentario de ${comentario.trim().length} caracteres.`)
+    return res.status(400).json({ error: `El comentario puede tener hasta ${MAX_LARGO_COMENTARIO} caracteres` })
   }
 
   const { data: perfil } = await supabase
@@ -479,7 +531,12 @@ async function calificarTrabajo(req, res) {
     return res.status(500).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
   }
 
-  const reputacion = await recalcularReputacion(trabajo.trabajador_id)
+  let reputacion = null
+  try {
+    reputacion = await actualizarReputacion(trabajo.trabajador_id)
+  } catch {
+    // La calificación ya quedó guardada; la reputación se vuelve a calcular en la próxima consulta.
+  }
 
   res.json({ message: 'Calificación enviada', calificacion, reputacion })
 
@@ -489,21 +546,6 @@ async function calificarTrabajo(req, res) {
     mensaje: `Recibiste ${puntaje} estrella${puntaje === 1 ? '' : 's'} por tu último trabajo.`,
     trabajoId,
   })
-}
-
-async function recalcularReputacion(empleadoId) {
-  const { data, error } = await supabase
-    .from('calificaciones').select('puntaje').eq('calificado_id', empleadoId)
-
-  if (error || !data?.length) {
-    if (error) console.error(`Error recalculando reputación (empleadoId=${empleadoId}): ${error.message ?? error}`)
-    return null
-  }
-
-  const promedio = parseFloat((data.reduce((suma, f) => suma + f.puntaje, 0) / data.length).toFixed(2))
-  const { error: errorUpdate } = await supabase.from('empleados').update({ reputacion: promedio }).eq('id', empleadoId)
-  if (errorUpdate) console.error(`Error guardando reputación (empleadoId=${empleadoId}): ${errorUpdate.message ?? errorUpdate}`)
-  return promedio
 }
 
 // GET /api/trabajos/:id/calificacion — para que la app sepa si ya se calificó.
@@ -519,8 +561,70 @@ async function obtenerCalificacion(req, res) {
   res.json({ calificacion: data })
 }
 
+// GET /api/trabajos/historial — Sprint 5. Todos los trabajos del usuario (los que
+// tomó, si es empleado; los que publicó, si es empleador) con estado, fecha,
+// duración y ganancia, más un resumen. La "ganancia" es el precio de los trabajos
+// completados (lo que cobra el trabajador / lo que pagó el empleador); los
+// cancelados y los que siguen abiertos van con 0.
+async function historialTrabajos(req, res) {
+  const { id: usuarioId, tipo } = req.usuario
+
+  const tabla = tipo === 'empleado' ? 'empleados' : 'perfiles'
+  const columna = tipo === 'empleado' ? 'trabajador_id' : 'empleador_id'
+
+  const { data: perfil } = await supabase.from(tabla).select('id').eq('user_id', usuarioId).maybeSingle()
+  if (!perfil) return res.status(404).json({ error: 'Perfil no encontrado' })
+
+  const { data: filas, error } = await supabase
+    .from('trabajos').select(CAMPOS_HISTORIAL).eq(columna, perfil.id).order('creado_en', { ascending: false })
+
+  if (error) {
+    console.error(`Error armando historial (${columna}=${perfil.id}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error cargando el historial' })
+  }
+
+  const ids = (filas ?? []).map(t => t.id)
+  const { data: calificaciones, error: errorCal } = ids.length
+    ? await supabase.from('calificaciones').select('trabajo_id, puntaje, comentario').in('trabajo_id', ids)
+    : { data: [], error: null }
+  if (errorCal) console.error(`Error leyendo calificaciones del historial: ${errorCal.message ?? errorCal}`)
+  const calificacionPorTrabajo = Object.fromEntries((calificaciones ?? []).map(c => [c.trabajo_id, c]))
+
+  const trabajos = (filas ?? []).map(t => ({
+    id:               t.id,
+    titulo:           t.titulo,
+    categoria:        t.categoria,
+    estado:           t.estado,
+    precio:           t.precio,
+    fecha:            t.finalizado_en ?? t.cancelado_en ?? t.creado_en,
+    creado_en:        t.creado_en,
+    iniciado_en:      t.iniciado_en,
+    finalizado_en:    t.finalizado_en,
+    cancelado_por:    t.cancelado_por,
+    duracionSegundos: calcularDuracionSegundos(t),
+    ganancia:         t.estado === 'completado' ? Number(t.precio) || 0 : 0,
+    calificacion:     calificacionPorTrabajo[t.id] ?? null,
+  })).sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+
+  const completados = trabajos.filter(t => t.estado === 'completado')
+  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0, 0, 0, 0)
+
+  res.json({
+    trabajos,
+    resumen: {
+      total:                 trabajos.length,
+      completados:           completados.length,
+      cancelados:            trabajos.filter(t => t.estado === 'cancelado').length,
+      enCurso:               trabajos.filter(t => ['asignado', 'en_progreso'].includes(t.estado)).length,
+      gananciaTotal:         completados.reduce((s, t) => s + t.ganancia, 0),
+      gananciaMes:           completados.filter(t => new Date(t.fecha) >= inicioMes).reduce((s, t) => s + t.ganancia, 0),
+      duracionTotalSegundos: completados.reduce((s, t) => s + (t.duracionSegundos ?? 0), 0),
+    },
+  })
+}
+
 module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
-  cancelarTrabajo, obtenerCandidatos, obtenerCalificacion,
+  cancelarTrabajo, obtenerCandidatos, obtenerCalificacion, historialTrabajos,
 }

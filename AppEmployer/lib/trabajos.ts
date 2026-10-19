@@ -8,6 +8,19 @@ import { apiGet, apiPost } from '../auth';
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
 export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
+export type TrabajadorAsignado = {
+  id: string;
+  nombre: string;
+  apellido: string;
+  foto_url: string | null;
+  reputacion: {
+    promedio: number | null;
+    score: number;
+    cantidadCalificaciones: number;
+    trabajosCompletados: number;
+  } | null;
+};
+
 export type Trabajo = {
   id: string;
   titulo: string;
@@ -23,6 +36,10 @@ export type Trabajo = {
   solicitud_expira_en: string | null;
   iniciado_en: string | null;
   finalizado_en: string | null;
+  /** Solo en el detalle, para el empleador: quién lo tomó y su reputación. */
+  trabajador?: TrabajadorAsignado | null;
+  /** Quién lo canceló, si está cancelado. Solo cuentan para la reputación los del trabajador. */
+  cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`). */
   duracionSegundos?: number | null;
 };

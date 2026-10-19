@@ -28,6 +28,11 @@ const PROXIMO_PASO: Partial<Record<EstadoTrabajo, string>> = {
   en_progreso: 'Al terminar, subí la foto y marcalo como finalizado.',
 };
 
+function avisoCancelado(t: Trabajo): string | null {
+  if (t.estado !== 'cancelado') return null;
+  return t.cancelado_por === 'empleado' ? 'Lo cancelaste vos.' : 'Lo canceló el empleador.';
+}
+
 // Los trabajos que aceptó el trabajador. Cada uno abre su pantalla de trabajo en curso,
 // que es donde se valida el PIN, se sube la foto y se finaliza.
 export default function MiTrabajoScreen() {
@@ -88,7 +93,7 @@ export default function MiTrabajoScreen() {
 
         {trabajos?.map(t => {
           const chip = ESTADO_CHIP[t.estado];
-          const paso = PROXIMO_PASO[t.estado];
+          const paso = PROXIMO_PASO[t.estado] ?? avisoCancelado(t);
           return (
             <Pressable
               key={t.id}

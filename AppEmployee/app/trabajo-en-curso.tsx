@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { getUsuario } from '../auth';
 import { seguirUbicacion, distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
 import {
+  cancelarTrabajo,
   obtenerTrabajo,
   validarPin,
   completarTrabajo,
@@ -38,8 +39,9 @@ export default function TrabajoEnCursoScreen() {
   const { trabajoId } = useLocalSearchParams<{ trabajoId: string }>();
 
   const [trabajo, setTrabajo] = useState<Trabajo | null>(null);
-  const [cargando, setCargando] = useState(true);
-  const [errorCarga, setErrorCarga] = useState('');
+  // Sin trabajoId no hay nada que cargar: el error se conoce desde el primer render.
+  const [cargando, setCargando] = useState(!!trabajoId);
+  const [errorCarga, setErrorCarga] = useState(trabajoId ? '' : 'No se recibió el trabajo.');
   const [error, setError] = useState('');
 
   const [pin, setPin] = useState('');
@@ -54,17 +56,21 @@ export default function TrabajoEnCursoScreen() {
   const [finalizando, setFinalizando] = useState(false);
   /** Ya confirmé la finalización, pero el empleador todavía no. */
   const [esperandoOtraParte, setEsperandoOtraParte] = useState(false);
+  // Cancelar pide un segundo toque (no hay confirm() en web).
+  const [confirmandoCancelar, setConfirmandoCancelar] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
 
   const [ultimaPos, setUltimaPos] = useState<Coordenadas | null>(null);
 
   const finalizado = trabajo?.estado === 'completado';
+  const cancelado = trabajo?.estado === 'cancelado';
 
   // ----- Traer el trabajo -----
   // Se vuelve a consultar cada 10 segundos: el empleador también puede darlo por terminado.
   const completadoRef = useRef(false);
 
   useEffect(() => {
-    if (!trabajoId) { setErrorCarga('No se recibió el trabajo.'); setCargando(false); return; }
+    if (!trabajoId) return;
 
     let activo = true;
 
@@ -73,7 +79,7 @@ export default function TrabajoEnCursoScreen() {
         const { trabajo: t } = await obtenerTrabajo(trabajoId!);
         if (!activo) return;
         setTrabajo(t);
-        completadoRef.current = t.estado === 'completado';
+        completadoRef.current = t.estado === 'completado' || t.estado === 'cancelado';
         setErrorCarga('');
       } catch (e: any) {
         if (activo) setErrorCarga(e?.message ?? 'No pudimos cargar el trabajo.');
@@ -93,7 +99,7 @@ export default function TrabajoEnCursoScreen() {
   // ----- Ubicación en tiempo real -----
   // Arranca apenas se acepta el trabajo y se corta al finalizar o al salir de la pantalla.
   useEffect(() => {
-    if (!trabajoId || finalizado) return;
+    if (!trabajoId || finalizado || cancelado) return;
 
     let cortar: (() => void) | null = null;
     let activo = true;
@@ -105,7 +111,7 @@ export default function TrabajoEnCursoScreen() {
     });
 
     return () => { activo = false; cortar?.(); };
-  }, [trabajoId, finalizado]);
+  }, [trabajoId, finalizado, cancelado]);
 
   // ----- PIN -----
   async function handleValidarPin() {
@@ -120,6 +126,23 @@ export default function TrabajoEnCursoScreen() {
       setErrorPin(e?.message ?? 'No pudimos validar el PIN.');
     } finally {
       setValidando(false);
+    }
+  }
+
+  // ----- Cancelar (solo antes de validar el PIN) -----
+  async function handleCancelar() {
+    if (!confirmandoCancelar) { setConfirmandoCancelar(true); return; }
+    setError('');
+    setCancelando(true);
+    try {
+      await cancelarTrabajo(trabajoId!);
+      setTrabajo(t => (t ? { ...t, estado: 'cancelado', cancelado_por: 'empleado' } : t));
+      completadoRef.current = true;
+    } catch (e: any) {
+      setError(e?.message ?? 'No pudimos cancelar el trabajo.');
+    } finally {
+      setCancelando(false);
+      setConfirmandoCancelar(false);
     }
   }
 
@@ -243,6 +266,31 @@ export default function TrabajoEnCursoScreen() {
     );
   }
 
+  // ----- Trabajo cancelado -----
+  if (cancelado) {
+    const loCanceleYo = trabajo.cancelado_por === 'empleado';
+    return (
+      <View
+        className="flex-1 bg-fondo items-center justify-center px-8"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <View className="w-24 h-24 rounded-full bg-error items-center justify-center mb-6">
+          <MaterialIcons name="close" size={56} color="#ffffff" />
+        </View>
+        <Text className="text-principal text-2xl font-nunito-bold text-center mb-2">Trabajo cancelado</Text>
+        <Text className="text-neutro text-sm font-nunito text-center leading-5">
+          {loCanceleYo
+            ? 'Cancelaste este trabajo y le avisamos al empleador. Las cancelaciones bajan tu score de reputación.'
+            : 'El empleador canceló este trabajo. No afecta tu reputación.'}
+        </Text>
+        <Pressable
+          onPress={() => router.replace('/buscar' as any)}
+          className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mt-8">
+          <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const esperandoPin = trabajo.estado === 'asignado';
   const lugar = { lat: trabajo.latitud, lng: trabajo.longitud };
 
@@ -339,6 +387,31 @@ export default function TrabajoEnCursoScreen() {
               {validando ? 'Validando…' : 'Validar PIN e iniciar'}
             </Text>
           </Pressable>
+
+          {error ? (
+            <Text className="text-error text-[13px] font-nunito text-center mt-3">{error}</Text>
+          ) : null}
+
+          {/* Bajarse del trabajo antes de empezarlo (cuenta como cancelación propia) */}
+          <Pressable
+            onPress={handleCancelar}
+            disabled={cancelando}
+            className={`rounded-xl py-3.5 items-center mt-6 border-[1.5px] border-error active:opacity-80 ${
+              confirmandoCancelar ? 'bg-error' : 'bg-white'
+            }`}>
+            <Text className={`text-sm font-nunito-bold ${confirmandoCancelar ? 'text-white' : 'text-error'}`}>
+              {cancelando
+                ? 'Cancelando…'
+                : confirmandoCancelar
+                ? 'Tocá de nuevo para cancelar'
+                : 'No puedo hacer este trabajo'}
+            </Text>
+          </Pressable>
+          {confirmandoCancelar ? (
+            <Text className="text-neutro text-xs font-nunito text-center mt-2 leading-4">
+              Cancelar un trabajo que aceptaste baja tu score de reputación.
+            </Text>
+          ) : null}
         </>
       ) : (
         <>

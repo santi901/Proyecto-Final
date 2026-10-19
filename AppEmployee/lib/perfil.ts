@@ -1,4 +1,5 @@
 import { apiGet, fetchAutenticado } from '../auth';
+import type { Reputacion } from './reputacion';
 
 // Perfil del trabajador (backend de Nico, `backend/src/routes/empleados.js`).
 
@@ -17,9 +18,11 @@ export type PerfilEmpleado = {
   lng: number | null;
 };
 
-export async function obtenerPerfil(): Promise<PerfilEmpleado> {
+// El perfil viene con la reputación (Sprint 5); `reputacion` es null si el backend no
+// la pudo calcular, para que el perfil se pueda editar igual.
+export async function obtenerPerfil(): Promise<{ perfil: PerfilEmpleado; reputacion: Reputacion | null }> {
   const data = await apiGet('/api/empleados/perfil');
-  return data.perfil;
+  return { perfil: data.perfil, reputacion: data.reputacion ?? null };
 }
 
 /**

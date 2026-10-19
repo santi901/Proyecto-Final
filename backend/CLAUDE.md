@@ -33,6 +33,7 @@ src/services/matchingService.js       worker matching by category/radius/availab
 src/services/notificacionesService.js logs every notification to `notificaciones`, then sends an Expo push
                                        (plain HTTP to exp.host) to the token in `push_tokens`; notificarNuevoTrabajo
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
+src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
 src/jobs/reasignarTrabajos.js         in-process poller: retries/auto-cancels 'pendiente' trabajos nobody accepted
 src/middleware/auth.js                autenticar (JWT check), soloEmpleado / soloEmpleador (role gates)
@@ -67,7 +68,9 @@ State machine driven by the `estado` column on `trabajos`: `pendiente` → (`emp
 
 `completado` requires both parties to confirm: `POST /:id/completar` (same endpoint both apps already call) sets `confirmado_empleado_en`/`confirmado_empleador_en` for whichever side calls it, and only flips `estado` to `completado` once both timestamps are set — a caller who already confirmed gets an idempotent "esperando confirmación" response instead of double-processing.
 
-`cancelado` is reachable from `pendiente`/`asignado` via `POST /:id/cancelar` (empleador-owner only) or automatically by the reassignment poller above; it's a terminal state like `completado` — not reachable once `en_progreso`.
+`cancelado` is reachable via `POST /:id/cancelar` — by the empleador-owner from `pendiente`/`asignado`, or by the assigned empleado from `asignado` only (counts against their reputation) — or automatically by the reassignment poller above. `cancelado_por` records who (`empleador`/`empleado`/`sistema`). It's a terminal state like `completado` — not reachable once `en_progreso`.
+
+`GET /api/trabajos/historial` (both roles; must stay mounted before `/:id`) returns the caller's trabajos — taken (empleado) or published (empleador) — with `estado`, `fecha` (finalizado/cancelado/creado), `duracionSegundos`, `ganancia` (= `precio` if `completado`, else 0) and the job's `calificacion`, plus a `resumen` (counts, `gananciaTotal`, `gananciaMes`, total time). It's all derived from existing `trabajos`/`calificaciones` columns — no extra table.
 
 `GET /:id/candidatos` (empleador-owner only) exposes `matchingService.buscarTrabajadoresDisponibles` directly, for visibility into who currently matches a job without waiting for the notification cycle.
 
@@ -83,7 +86,7 @@ There used to also be a Textract `DetectDocumentTextCommand` check on the DNI ph
 
 ### Matching (`src/services/matchingService.js`)
 
-Ported from the NestJS project's `src/matching/matching.service.ts` (same algorithm, same `haversine` formula): finds `empleados` whose `categorias` include the job's `categoria`, within each candidate's own `radio_busqueda` (or an overridden `radioKm`) of the job's own `latitud`/`longitud` (set from the employer's location when the job is published), excluding workers currently tied to a job in `asignado`/`en_progreso`, sorted by `reputacion` desc then distance asc. Used by `notificarNuevoTrabajo` (on creation and on every reassignment retry) and by `GET /api/trabajos/:id/candidatos`.
+Ported from the NestJS project's `src/matching/matching.service.ts` (same algorithm, same `haversine` formula): finds `empleados` whose `categorias` include the job's `categoria`, within each candidate's own `radio_busqueda` (or an overridden `radioKm`) of the job's own `latitud`/`longitud` (set from the employer's location when the job is published), excluding workers currently tied to a job in `asignado`/`en_progreso`, sorted by the weighted reputation `score` desc (see Reputación below) then distance asc. Used by `notificarNuevoTrabajo` (on creation and on every reassignment retry) and by `GET /api/trabajos/:id/candidatos`.
 
 ### Realtime (`src/realtime/socket.js`)
 
@@ -93,7 +96,8 @@ Ported from the NestJS project's `src/matching/matching.service.ts` (same algori
 
 - **Chat** (`mensajesController.js`): `POST/GET /api/trabajos/:id/mensajes`, participants only (`esParticipanteTrabajo`). Sending is allowed from the moment someone accepts (`asignado`) through `en_progreso`; listing keeps working afterwards as history.
 - **Evidencia** (`evidenciaController.js`): `POST /api/trabajos/:id/evidencia` (multipart field `foto`, 10MB max, assigned `empleado` only, job `en_progreso`/`completado`) uploads to S3 under `{trabajoId}/evidencia-*.jpg` and inserts into `evidencias_trabajo`; `GET` (either participant) returns each row with a presigned `url`. Uploading notifies the empleador.
-- **Calificación** (`calificarTrabajo`): `POST /api/trabajos/:id/calificar` (empleador-owner, job `completado`, once per job — 409 otherwise) inserts into `calificaciones` and recalculates `empleados.reputacion` (average, what matching sorts by). `GET /:id/calificacion` returns it or `null`.
+- **Calificación** (`calificarTrabajo`): `POST /api/trabajos/:id/calificar` (empleador-owner, job `completado`, once per job — 409 otherwise; `puntaje` integer 1-5, optional `comentario` up to 500 chars) inserts into `calificaciones` and stores the simple average in `empleados.reputacion`. `GET /:id/calificacion` returns it or `null`.
+- **Reputación** (`services/reputacionService.js`, Sprint 5): `promedio` is the plain star average; `score` (what matching sorts by) is computed on the fly — never stored — as a Bayesian average (2 phantom ratings of 3★, so few ratings stay near 3) where each rating weighs `0.5^(age/180 days)`, multiplied by `1 − 0.5 × tasaCancelacion` (worker's own cancellations / (completados + those cancellations); employer/system cancellations don't count). Exposed in `GET /api/empleados/perfil` (`reputacion` next to `perfil`), `GET /api/empleados/:id/reputacion`, the empleador's view of `GET /api/trabajos/:id` (`trabajo.trabajador.reputacion`) and in `/:id/candidatos`.
 - **Notificaciones** (`routes/notificaciones.js`): `POST /api/notificaciones/registrar-token` (apps call it on entering the tabs, via `expo-notifications`) upserts into `push_tokens`; `GET /api/notificaciones` lists the caller's history. `notificar()` never throws — a row is always written (`pendiente` → `enviado`/`fallido`) even if there's no token or Expo rejects the push.
 
 ### Redis (`src/config/redis.js`)
