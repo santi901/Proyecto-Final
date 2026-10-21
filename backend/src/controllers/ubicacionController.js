@@ -60,6 +60,13 @@ async function calcularViaje(req, res) {
 async function actualizarUbicacion(req, res) {
   const { workerId, lat, lng, jobId } = req.body
 
+  // Cada usuario solo puede publicar su propia ubicación (si no, cualquiera con
+  // sesión podía mover a otro trabajador en el mapa del empleador).
+  if (workerId && workerId !== req.usuario.id) {
+    console.error(`Actualización de ubicación rechazada: usuarioId=${req.usuario.id} intentó publicar la de workerId=${workerId}.`)
+    return res.status(403).json({ error: 'Solo podés actualizar tu propia ubicación.' })
+  }
+
   if (!workerId || lat == null || lng == null) {
     console.error(`Actualización de ubicación rechazada: faltan datos (workerId=${workerId}, lat=${lat}, lng=${lng}).`)
     return res.status(400).json({ error: 'Faltan workerId, lat o lng.' })

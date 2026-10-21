@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const { RekognitionClient, CompareFacesCommand } = require('@aws-sdk/client-rekognition')
 const { guardarImagen } = require('../utils/storage')
 
@@ -27,7 +28,8 @@ async function compararCaras(req, res) {
   }
 
   if (dni.buffer.equals(selfie.buffer)) {
-    console.error(`Verificación rechazada (userId=${userId}): la foto de DNI y la selfie son el mismo archivo (bytes idénticos).`)
+    const huella = crypto.createHash('sha256').update(dni.buffer).digest('hex').slice(0, 12)
+    console.error(`Verificación rechazada (userId=${userId}): la foto de DNI y la selfie son el mismo archivo (bytes idénticos: ${dni.buffer.length} bytes, sha256 ${huella}).`)
     return res.status(400).json({ error: 'El DNI y la selfie no pueden ser la misma imagen.' })
   }
 
@@ -57,6 +59,10 @@ async function compararCaras(req, res) {
       archivos: { dni: rutaDni, selfie: rutaSelfie },
     })
   } catch (err) {
+    if (err.name === 'InvalidImageFormatException' || err.name === 'ImageTooLargeException') {
+      console.error(`Verificación fallida (userId=${userId}): Rekognition rechazó el formato/tamaño de la imagen. ${err.message}`)
+      return res.status(400).json({ error: 'Las fotos tienen que ser JPG o PNG de hasta 5 MB.' })
+    }
     if (err.name === 'InvalidParameterException') {
       console.error(`Verificación fallida (userId=${userId}): Rekognition no detectó una cara en el DNI o en la selfie. ${err.message}`)
       return res.status(400).json({ error: 'No se detectó una cara en el DNI o en la selfie. Asegurate de que las fotos sean claras.' })

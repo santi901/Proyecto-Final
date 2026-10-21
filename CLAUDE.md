@@ -7,13 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is the **ChanguitApp** monorepo (school project). It contains three independently-versioned projects glued together in one repo, built by different people and merged in later — they do **not** share dependencies, `node_modules`, or a common package.json, and each has its own environment config:
 
 - **Root (`/src`, `/prisma`, `/test`)** — NestJS backend, referred to in code comments as "el backend de Nacho/Ignacio". Originally handled identity verification, location/distance and matching; **as of 2026-07 those three were reimplemented in `backend/`** (see below) and neither app calls them here anymore. What is still live in this project: push notifications, ratings, and job evidence photos — `backend/` reaches it server-to-server (`NACHO_API_URL`) for the first two, and both apps call it directly to register push tokens and upload/list evidence photos (see "Expo apps" below). `verificacion/`, `location/` and `matching/` are kept in the repo but nothing calls them: don't assume that code is what runs.
-- **`backend/`** — Express/CommonJS backend ("el backend de Nico"). Handles auth, users, the jobs (`trabajos`) lifecycle (PIN validation, cancellation, automatic reassignment, dual-confirmation completion) including chat and rating, **and now also identity verification, location/distance, and worker matching** (ported from the NestJS project above), plus real-time location sharing over WebSocket and an ephemeral Redis location cache. This is the main backend both Expo apps talk to. See [backend/CLAUDE.md](backend/CLAUDE.md) for its full architecture — read that file before working in `backend/`.
+- **`backend/`** — Express/CommonJS backend ("el backend de Nico"). Handles auth, users, the jobs (`trabajos`) lifecycle (PIN validation, cancellation, automatic reassignment, dual-confirmation completion) including chat and rating, **and now also identity verification, location/distance, and worker matching** (ported from the NestJS project above), plus real-time location sharing over WebSocket, an ephemeral Redis location cache, and (sprint 5) server-side pricing plus MercadoPago payments: charge on creation, hold until completion, commission, refunds on cancellation, manual payouts to workers. This is the main backend both Expo apps talk to. See [backend/CLAUDE.md](backend/CLAUDE.md) for its full architecture — read that file before working in `backend/`.
 - **`AppEmployee/`** and **`AppEmployer/`** — two near-identical Expo/React Native apps (worker-facing and employer-facing clients), each with its own `package.json`.
 
 ## Commands
 
 Root NestJS backend (run from repo root):
-- `npm run start:dev` — start with watch mode
+- `npm run start:dev` — start with watch mode. Both backends default to port 3000, but `backend/` (`NACHO_API_URL`) and the apps (`EXPO_PUBLIC_NACHO_API_URL`) expect this one on **3001** — set `PORT=3001` in the root `.env` when running both.
 - `npm run build` — `nest build`
 - `npm run lint` — eslint --fix over `{src,apps,libs,test}`
 - `npm run format` — prettier --write over `src`/`test`
@@ -24,7 +24,7 @@ Root NestJS backend (run from repo root):
 
 `backend/` (Express, run from `backend/`): `npm run dev` (nodemon) or `npm start`. No build step, no test suite, no lint config — see [backend/CLAUDE.md](backend/CLAUDE.md).
 
-`AppEmployee/` and `AppEmployer/` (run from each app's own directory): `npm start` (Expo dev server), `npm run android` / `npm run ios` / `npm run web`, `npm run lint` (`expo lint`).
+`AppEmployee/` and `AppEmployer/` (run from each app's own directory): `npm start` (Expo dev server), `npm run android` / `npm run ios` / `npm run web`, `npm run lint` (`expo lint`). Env comes from `.env.local` (copy `.env.example`). In dev builds `auth.ts` (`resolverUrl`) replaces the host of any `http://` backend URL with the dev machine's LAN IP taken from Metro (`Constants.expoConfig.hostUri`), keeping only the port. A stale IP in `.env.local` (the school Wi-Fi hands out a new one per connection, which showed up as "Network request timed out" in the identity check) therefore no longer matters. `https://` URLs, `--tunnel` and production builds are used as written. After editing `.env.local`, restart with `npx expo start -c`: `EXPO_PUBLIC_*` values are inlined at bundle time.
 
 ## Root NestJS backend architecture
 
@@ -70,7 +70,7 @@ Both routes are unauthenticated at the Nest layer — no guards are registered o
 
 ### Evidencia (`src/evidencia`)
 
-`POST /trabajos/:trabajoId/evidencia` (multipart field `foto`, body field `subidoPor`) uploads a completion photo via `StorageService` and inserts a row into `evidencias_trabajo` (`trabajo_id`, `s3_key`, `subido_por`, `creado_en`). `GET /trabajos/:trabajoId/evidencia` lists them, most recent first. Both responses add a signed `url` per row (`StorageService.obtenerUrlFirmada`, 1h expiry via `@aws-sdk/s3-request-presigner`) — the bucket is private, so `s3_key` alone isn't viewable by the app. `AppEmployee` uploads the photo from `trabajo-en-curso.tsx` right before completing a job and `AppEmployer` renders that signed `url` in `seguimiento.tsx` (`lib/evidencia.ts` in each app).
+`POST /trabajos/:trabajoId/evidencia` takes `subidoPor` plus the photo, either as JSON `fotoBase64` (what AppEmployee sends; `main.ts` raises the JSON body limit to 15mb for it) or as the legacy multipart field `foto`. The controller rejects empty, oversized (>10 MB) or non-JPEG/PNG files by magic bytes. Both apps read photos with `lib/archivos.ts` `leerBase64` instead of putting `expo-file-system` `File` objects in a `FormData`, which delivered the wrong bytes depending on which fetch implementation was active. It then uploads a completion photo via `StorageService` and inserts a row into `evidencias_trabajo` (`trabajo_id`, `s3_key`, `subido_por`, `creado_en`). `GET /trabajos/:trabajoId/evidencia` lists them, most recent first. Both responses add a signed `url` per row (`StorageService.obtenerUrlFirmada`, 1h expiry via `@aws-sdk/s3-request-presigner`) — the bucket is private, so `s3_key` alone isn't viewable by the app. `AppEmployee` uploads the photo from `trabajo-en-curso.tsx` right before completing a job and `AppEmployer` renders that signed `url` in `seguimiento.tsx` (`lib/evidencia.ts` in each app).
 
 ### Calificaciones (`src/calificaciones`)
 
@@ -88,14 +88,20 @@ Lint/format: ESLint flat config (`eslint.config.mjs`) using `typescript-eslint` 
 
 ## Expo apps (`AppEmployee/`, `AppEmployer/`)
 
-Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Differences are in the `(tabs)` screens:
-- `AppEmployee`: `buscar.tsx`, `dashboard.tsx` — worker searches for jobs.
-- `AppEmployer`: `ofrecer.tsx`, `dashboard.tsx` — employer posts jobs.
+Both apps are Expo Router + NativeWind (Tailwind) projects with nearly identical structure (`app/`, `components/`, `hooks/`, `lib/`, `constants/`). Shared files (`auth.ts`, most of `lib/`, `chat.tsx`, `register.tsx`, `onboarding.tsx`) are copies, not a shared package, so a fix in one app usually has to be mirrored by hand in the other. Differences:
+- `AppEmployee`: tabs `buscar.tsx`, `dashboard.tsx`, `explore.tsx`; plus `perfil.tsx` (+ `lib/perfil.ts`, `lib/categorias.ts`) and `trabajo-en-curso.tsx` — worker searches for and works jobs.
+- `AppEmployer`: tabs `ofrecer.tsx`, `dashboard.tsx`, `explore.tsx`; plus `seguimiento.tsx` — employer posts and tracks jobs.
+
+The job category list exists twice: `AppEmployee/lib/categorias.ts` (`CATEGORIAS`) and a local `CATEGORIAS` in `AppEmployer/app/(tabs)/ofrecer.tsx`. Matching (`backend/src/services/matchingService.js`) compares them by exact string (`.contains('categorias', [trabajo.categoria])`), so both lists must stay identical character for character, accents included. The comment in `categorias.ts` still points at the old NestJS matching endpoint, which is outdated.
+
+`auth.ts` routes every request through `lib/fetchConTimeout.ts` (15s `AbortController` timeout, so a backend that's down shows an error instead of an infinite spinner), and `fetchAutenticado` retries once after `/api/auth/refresh` on a **403** (`backend/src/middleware/auth.js` returns 403 for an invalid/expired token and 401 only when the token is missing; its role-mismatch rejections are also 403, so those trigger a pointless refresh too). Use these for new calls instead of raw `fetch`. `lib/alerta.ts` (`alertaSimple`) exists because `Alert.alert` does nothing on react-native-web.
 
 Both apps talk mainly to `backend/` (Nico's Express API), plus the NestJS backend above for the two things `backend/` doesn't expose:
-- `auth.ts` → `EXPO_PUBLIC_API_URL` (defaults `http://localhost:3000`) — exports `API_URL`, `getAccessToken()` and the authenticated `apiGet`/`apiPost` helpers, used for `/api/auth/*` (login, register, logout, session storage via AsyncStorage), by `lib/trabajos.ts` (jobs lifecycle; in `AppEmployer` also the rating) and by `lib/chat.ts` (`/api/trabajos/:id/mensajes`, polled every few seconds — there are no websockets).
+- `auth.ts` → `EXPO_PUBLIC_API_URL` (defaults `http://localhost:3000`) — exports `API_URL`, `getAccessToken()` and the authenticated `apiGet`/`apiPost` helpers, used for `/api/auth/*` (login, register, logout, session storage via AsyncStorage), by `lib/trabajos.ts` (jobs lifecycle; in `AppEmployer` also the rating) and by `lib/chat.ts` (`/api/trabajos/:id/mensajes`, polled every few seconds — chat has no websocket; `backend/`'s WebSocket is only used for live location).
 - `lib/ubicacion.ts` imports `API_URL`/`getAccessToken` from `auth.ts` and calls `/api/ubicacion/actualizar-ubicacion` (sends the stored access token as a Bearer header — that route requires auth). `register.tsx` in each app calls `/api/verificacion/comparar-caras` the same way, posting `dni`/`selfie` as separate multipart fields (matching `backend/src/routes/verificacion.js`'s `multer` field names).
-- `auth.ts` also exports `NACHO_API_URL` → `EXPO_PUBLIC_NACHO_API_URL` (defaults `http://localhost:3001`), used only by `lib/notificaciones.ts` (`/notificaciones/registrar-token`) and `lib/evidencia.ts` (`/trabajos/:trabajoId/evidencia`). Verification and location go through `API_URL`, not this one; a hardcoded `ngrok-free.app` placeholder URL is leftover from before the consolidation and should be repointed at `API_URL`.
+- `auth.ts` also exports `NACHO_API_URL` → `EXPO_PUBLIC_NACHO_API_URL` (defaults `http://localhost:3001`), used only by `lib/notificaciones.ts` (`/notificaciones/registrar-token`) and `lib/evidencia.ts` (`/trabajos/:trabajoId/evidencia`). Verification, location and matching go through `API_URL`, not this one.
+
+Payments (`AppEmployer` only) — currently **simulated** (no real MercadoPago account; `checkout.tsx` is an in-app fake checkout, see backend/CLAUDE.md "Pagos"): `ofrecer.tsx` gets the price from `POST /api/trabajos/cotizar` (the app no longer computes a price) and creates the job with the returned `cotizacionToken`. It then opens MercadoPago's checkout via `lib/pagos.ts` (`expo-web-browser`), and `seguimiento.tsx` polls `GET /api/trabajos/:id/pago` while the job is `pago_pendiente`. `AppEmployee` shows `monto_trabajador` (price minus commission) via `montoTrabajador()` in `lib/trabajos.ts`, and `perfil.tsx` collects `aliasCobro` (CBU/CVU/alias for payouts). Full flow in [backend/CLAUDE.md](backend/CLAUDE.md) under "Pagos".
 
 `supabaseClient.ts` in each app hardcodes a Supabase project URL + anon key directly in source (not read from env) — this is the public anon key, used for direct client-side Supabase calls separate from either backend.
 
@@ -103,6 +109,6 @@ Request bodies to the Express backend use camelCase field names (`fechaNacimient
 
 ## Conventions
 
-- Spanish is used throughout for identifiers, JSON field/route names, and user-facing error/exception messages across all three backends and both apps — match this when adding code rather than switching to English.
-- `backend/` and the root NestJS project both implement verification and location/distance independently (Express+Supabase vs NestJS+AWS). The NestJS versions are no longer called by either app (see "Repository shape" above) — treat `backend/`'s implementation as the one to fix/extend.
+- Spanish is used throughout for identifiers, JSON field/route names, and user-facing error/exception messages across both backends and both apps — match this when adding code rather than switching to English.
+- `backend/` and the root NestJS project both implement verification, location/distance and matching independently. The NestJS versions are no longer called by anything (see "Repository shape" above) — treat `backend/`'s implementation as the one to fix/extend.
 - `backend/` controllers log to `console.error` with a short description at each error branch (validation rejections, AWS/Supabase failures, geocoding failures), not just on unexpected exceptions — keep this pattern when adding new error paths so failures are diagnosable from the server console.

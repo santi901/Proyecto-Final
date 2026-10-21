@@ -15,6 +15,8 @@ export type PerfilEmpleado = {
   foto_dni_url: string | null;
   lat: number | null;
   lng: number | null;
+  /** CBU/CVU o alias adonde la plataforma le transfiere lo que cobra. */
+  alias_cobro: string | null;
 };
 
 export async function obtenerPerfil(): Promise<PerfilEmpleado> {
@@ -44,6 +46,7 @@ export async function actualizarPerfil(datos: {
   fotoDniUrl: string | null;
   lat: number | null;
   lng: number | null;
+  aliasCobro: string | null;
 }): Promise<PerfilEmpleado> {
   const res = await fetchAutenticado('/api/empleados/perfil', {
     method: 'PUT',

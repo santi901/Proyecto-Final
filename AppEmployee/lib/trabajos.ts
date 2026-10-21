@@ -5,7 +5,9 @@ import { apiGet, apiPost } from '../auth';
 
 // 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
-export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// 'pago_pendiente' es previo a 'pendiente' (el empleador todavía no pagó): el backend no
+// le muestra esos trabajos al trabajador, pero el tipo lo incluye para que coincida.
+export type EstadoTrabajo = 'pago_pendiente' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type Trabajo = {
   id: string;
@@ -13,7 +15,11 @@ export type Trabajo = {
   descripcion: string;
   categoria: string;
   nivel_dificultad: string | null;
+  /** Lo que paga el empleador. El trabajador cobra `monto_trabajador` (precio - comisión). */
   precio: number;
+  comision_porcentaje: number | null;
+  /** null en trabajos creados antes de que existiera el cobro con MercadoPago. */
+  monto_trabajador: number | null;
   estado: EstadoTrabajo;
   /** Lugar del trabajo: la ubicación del empleador cuando lo publicó. */
   latitud: number;
@@ -26,6 +32,11 @@ export type Trabajo = {
   /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
   duracionSegundos?: number | null;
 };
+
+/** Lo que cobra el trabajador por este trabajo, ya descontada la comisión de la plataforma. */
+export function montoTrabajador(t: Pick<Trabajo, 'precio' | 'monto_trabajador'>): number {
+  return t.monto_trabajador ?? t.precio;
+}
 
 /** Tiempo para responder una solicitud entrante, salvo que expire antes. */
 export const SEGUNDOS_LIMITE_POR_DEFECTO = 30;

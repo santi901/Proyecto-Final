@@ -11,10 +11,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { File } from 'expo-file-system';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from '../supabaseClient'; // solo para Storage
-import { registrarEmpleado, API_URL } from '../auth';
+import { registrarEmpleado } from '../auth';
+import { verificarIdentidad } from '../lib/verificacion';
 import { useRouter } from 'expo-router';
 import MapaHtml from '../components/mapa-html';
 import SelectorCategorias from '../components/selector-categorias';
@@ -216,20 +216,10 @@ export default function RegisterScreen() {
     setVerifMensaje('');
     setVerifEstado('procesando');
     try {
-      const formData = new FormData();
-      formData.append('dni', new File(fotoDni!), `dni-${form.dni}.jpg`);
-      formData.append('selfie', new File(fotoPerfil!), `selfie-${form.dni}.jpg`);
-      formData.append('userId', form.dni);
-
-      const verificacion = await fetch(`${API_URL}/api/verificacion/comparar-caras`, {
-        method: 'POST',
-        body: formData,
-      });
-  
-      const resultado = await verificacion.json();
+      const { ok, resultado } = await verificarIdentidad(fotoDni!, fotoPerfil!, form.dni);
       console.log('Resultado AWS:', resultado);
 
-      if (!verificacion.ok || resultado.estado !== 'aprobado') {
+      if (!ok || resultado.estado !== 'aprobado') {
         const sim = typeof resultado.similitud === 'number' ? ` (similitud: ${resultado.similitud.toFixed(1)}%)` : '';
         setVerifMensaje(
           resultado.mensaje || resultado.error || resultado.message ||

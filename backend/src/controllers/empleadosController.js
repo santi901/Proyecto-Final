@@ -19,7 +19,7 @@ async function actualizarPerfil(req, res) {
   const {
     nombre, apellido, fechaNacimiento, dni,
     codigoPostal, direccion, radioBusqueda,
-    fotoUrl, fotoDniUrl, lat, lng, categorias,
+    fotoUrl, fotoDniUrl, lat, lng, categorias, aliasCobro,
   } = req.body
 
   if (!nombre || !apellido || !fechaNacimiento || !dni || !codigoPostal || !direccion) {
@@ -40,6 +40,9 @@ async function actualizarPerfil(req, res) {
       lat:             lat ?? null,
       lng:             lng ?? null,
       categorias:      Array.isArray(categorias) ? categorias : [],
+      // CBU/CVU o alias adonde se le transfieren las liquidaciones. Si la app no
+      // lo manda (versiones viejas), no se pisa el que ya estaba guardado.
+      ...(aliasCobro !== undefined ? { alias_cobro: aliasCobro || null } : {}),
     })
     .eq('user_id', id)
     .select()

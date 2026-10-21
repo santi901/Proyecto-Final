@@ -20,7 +20,7 @@ import {
   formatearDistancia,
   type Coordenadas,
 } from '../../lib/ubicacion';
-import { listarTrabajos, aceptarTrabajo, type Trabajo } from '../../lib/trabajos';
+import { listarTrabajos, aceptarTrabajo, montoTrabajador, type Trabajo } from '../../lib/trabajos';
 import MapaUbicacion from '../../components/mapa-ubicacion';
 import ModalSolicitud from '../../components/modal-solicitud';
 import BotonChat from '../../components/boton-chat';
@@ -364,7 +364,7 @@ export default function BuscarTrabajoScreen() {
                 className="bg-white rounded-xl border border-neutro p-4 mb-3 active:opacity-70">
                 <View className="flex-row justify-between items-start mb-1">
                   <Text className="text-base font-nunito-bold text-principal flex-1 pr-2">{t.titulo}</Text>
-                  <Text className="text-base font-nunito-bold text-principal">${t.precio}</Text>
+                  <Text className="text-base font-nunito-bold text-principal">${montoTrabajador(t)}</Text>
                 </View>
                 <Text className="text-[13px] font-nunito text-neutro mb-1">
                   {t.categoria}

@@ -7,6 +7,7 @@ import { misTrabajosPublicados, obtenerPinLocal, type EstadoTrabajo, type Trabaj
 import { Paleta, sombra } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
+  pago_pendiente: 'Falta pagar',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -16,6 +17,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string; sombra?: string }> = {
+  pago_pendiente: { fondo: 'bg-fondo-suave', texto: 'text-error', sombra: Paleta.error },
   pendiente: { fondo: 'bg-fondo-suave', texto: 'text-neutro', sombra: Paleta.neutro },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },

@@ -36,6 +36,7 @@ export default function PerfilScreen() {
     codigo_postal: '',
     direccion: '',
     radio_busqueda: '',
+    alias_cobro: '',
   });
   const [categorias, setCategorias] = useState<string[]>([]);
 
@@ -52,6 +53,7 @@ export default function PerfilScreen() {
           codigo_postal: p.codigo_postal ?? '',
           direccion: p.direccion ?? '',
           radio_busqueda: p.radio_busqueda != null ? String(p.radio_busqueda) : '',
+          alias_cobro: p.alias_cobro ?? '',
         });
         setCategorias(p.categorias ?? []);
       })
@@ -78,6 +80,12 @@ export default function PerfilScreen() {
       setError('Elegí al menos una categoría de trabajo.');
       return;
     }
+    // Mismo formato que valida el backend: CBU/CVU de 22 dígitos o alias de 6 a 20 caracteres.
+    const alias = form.alias_cobro.trim();
+    if (alias && !/^(\d{22}|[a-zA-Z0-9.-]{6,20})$/.test(alias)) {
+      setError('El CBU/CVU tiene que tener 22 dígitos, o el alias entre 6 y 20 caracteres.');
+      return;
+    }
     if (!perfil) return;
 
     setGuardando(true);
@@ -96,6 +104,7 @@ export default function PerfilScreen() {
         fotoDniUrl: perfil.foto_dni_url,
         lat: perfil.lat,
         lng: perfil.lng,
+        aliasCobro: alias || null,
       });
 
       setPerfil(actualizado);
@@ -206,6 +215,21 @@ export default function PerfilScreen() {
       <SelectorCategorias
         seleccionadas={categorias}
         onCambiar={c => { setCategorias(c); setGuardado(false); }}
+      />
+
+      <Text className="text-base font-nunito-bold text-principal mt-2 mb-1">Cómo cobrás</Text>
+      <Text className="text-sm text-neutro mb-3 font-nunito leading-5">
+        Cuando terminás un trabajo te transferimos lo que cobraste (ya descontada la comisión)
+        a este CBU, CVU o alias.
+      </Text>
+      <TextInput
+        className={inputClass}
+        placeholder="CBU, CVU o alias"
+        placeholderTextColor={Paleta.neutro}
+        value={form.alias_cobro}
+        onChangeText={v => actualizar('alias_cobro', v.trim())}
+        autoCapitalize="none"
+        autoCorrect={false}
       />
 
       {error ? (

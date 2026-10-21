@@ -20,6 +20,13 @@ async function buscarTrabajadoresDisponibles(trabajoId, radioKm) {
     throw { status: 400, message: 'Este trabajo no tiene una ubicación cargada.' }
   }
 
+  return buscarTrabajadoresCerca(trabajo, radioKm)
+}
+
+// Igual que buscarTrabajadoresDisponibles pero a partir de { categoria, latitud, longitud }
+// sueltos, sin un trabajo creado: lo usa preciosService para medir la oferta de
+// trabajadores al cotizar, antes de que el trabajo exista.
+async function buscarTrabajadoresCerca(trabajo, radioKm) {
   const { data: candidatos, error: candidatosError } = await supabase
     .from('empleados')
     .select('id, user_id, nombre, apellido, lat, lng, radio_busqueda, categorias, reputacion')
@@ -62,4 +69,4 @@ async function buscarTrabajadoresDisponibles(trabajoId, radioKm) {
     }))
 }
 
-module.exports = { buscarTrabajadoresDisponibles }
+module.exports = { buscarTrabajadoresDisponibles, buscarTrabajadoresCerca }

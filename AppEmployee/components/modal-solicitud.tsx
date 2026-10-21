@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Paleta } from '@/constants/theme';
-import { SEGUNDOS_LIMITE_POR_DEFECTO, segundosParaResponder, type Trabajo } from '../lib/trabajos';
+import { SEGUNDOS_LIMITE_POR_DEFECTO, montoTrabajador, segundosParaResponder, type Trabajo } from '../lib/trabajos';
 import { distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
 
 type Props = {
@@ -102,7 +102,7 @@ export default function ModalSolicitud({ trabajo, miUbicacion, onAceptar, onRech
 
             <View className="bg-fondo-suave border border-neutro rounded-xl px-4 py-3 mb-5">
               <Text className="text-neutro text-xs font-nunito mb-0.5">Pago por el trabajo</Text>
-              <Text className="text-principal text-2xl font-nunito-bold">${trabajo.precio}</Text>
+              <Text className="text-principal text-2xl font-nunito-bold">${montoTrabajador(trabajo)}</Text>
             </View>
 
             <Pressable

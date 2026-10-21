@@ -14,7 +14,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
-import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
+import {
+  cotizarTrabajo,
+  crearTrabajo,
+  guardarPinLocal,
+  cotizacionVencida,
+  type Cotizacion,
+} from '../../lib/trabajos';
+import { abrirCheckout } from '../../lib/pagos';
 import BotonChat from '../../components/boton-chat';
 import VistaFormulario from '../../components/vista-formulario';
 import CampoTexto from '../../components/campo-texto';
@@ -29,12 +36,8 @@ const PANEL_WIDTH = Math.round(SCREEN_W * 0.78);
 const CATEGORIAS = ['Limpieza', 'Mudanza', 'Jardín', 'Pintura', 'Plomería', 'Otros'];
 const DIFICULTADES = ['Simple', 'Intermedio', 'Complejo'] as const;
 
-// El precio lo fija la app según la dificultad: no se negocia con el trabajador.
-const PRECIOS: Record<typeof DIFICULTADES[number], number> = {
-  Simple: 2500,
-  Intermedio: 4500,
-  Complejo: 7000,
-};
+// El precio no se negocia con el trabajador ni lo elige el empleador: lo calcula el
+// backend (POST /api/trabajos/cotizar) según categoría, dificultad, demanda y horario.
 
 export default function OfrecerTrabajoScreen() {
   const router = useRouter();
@@ -99,13 +102,62 @@ export default function OfrecerTrabajoScreen() {
     return () => { activo = false; detenerSeguimiento?.(); };
   }, [router]);
 
+  // ----- Cotización -----
+  // Se pide al backend cada vez que el empleador elige categoría o dificultad (no cuando
+  // se mueve la ubicación: se actualiza cada 10s y no tiene sentido recotizar por eso).
+  const [cotizacion, setCotizacion] = useState<Cotizacion | null>(null);
+  const [cotizacionToken, setCotizacionToken] = useState<string | null>(null);
+  const [validaHasta, setValidaHasta] = useState<string | null>(null);
+  const [cotizando, setCotizando] = useState(false);
+  const [errorCotizacion, setErrorCotizacion] = useState('');
+  // Si se tocan dos opciones seguidas, solo cuenta la respuesta de la última.
+  const ultimaCotizacion = useRef(0);
+
+  async function pedirCotizacion(cat = categoria, dif = dificultad) {
+    setCotizacion(null);
+    setCotizacionToken(null);
+    setErrorCotizacion('');
+    if (cat === null || !dif || !coords) return;
+
+    const pedido = ++ultimaCotizacion.current;
+    setCotizando(true);
+    try {
+      const r = await cotizarTrabajo({
+        categoria: CATEGORIAS[cat],
+        nivelDificultad: dif,
+        latitud: coords.lat,
+        longitud: coords.lng,
+      });
+      if (pedido !== ultimaCotizacion.current) return;
+      setCotizacion(r.cotizacion);
+      setCotizacionToken(r.cotizacionToken);
+      setValidaHasta(r.validaHasta);
+    } catch (e: any) {
+      if (pedido === ultimaCotizacion.current) setErrorCotizacion(e?.message ?? 'No pudimos calcular el precio.');
+    } finally {
+      if (pedido === ultimaCotizacion.current) setCotizando(false);
+    }
+  }
+
+  function elegirCategoria(i: number) {
+    setCategoria(i);
+    pedirCotizacion(i, dificultad);
+  }
+
+  function elegirDificultad(d: typeof DIFICULTADES[number]) {
+    setDificultad(d);
+    pedirCotizacion(categoria, d);
+  }
+
   // ----- Publicación del trabajo -----
   const [publicando, setPublicando] = useState(false);
   const [errorPublicar, setErrorPublicar] = useState('');
 
-  const precio = dificultad ? PRECIOS[dificultad] : null;
+  const precio = cotizacion?.precio ?? null;
 
-  // Publica el trabajo (en la ubicación actual del empleador) y salta al seguimiento.
+  // Crea el trabajo, abre el checkout de MercadoPago y salta al seguimiento (que muestra
+  // si el pago se acreditó y permite reintentarlo). El trabajo recién se publica para
+  // los trabajadores cuando MP confirma el pago.
   // El backend devuelve el PIN una sola vez, acá: se guarda en el dispositivo para
   // poder mostrarlo en el seguimiento y en "Mis trabajos".
   async function handleOfrecer() {
@@ -114,19 +166,27 @@ export default function OfrecerTrabajoScreen() {
     if (!titulo.trim()) { setErrorPublicar('Poné un título al trabajo.'); return; }
     if (categoria === null) { setErrorPublicar('Elegí una categoría.'); return; }
     if (!descripcion.trim()) { setErrorPublicar('Escribí una descripción.'); return; }
-    if (!dificultad || precio === null) { setErrorPublicar('Elegí la dificultad del trabajo.'); return; }
+    if (!dificultad) { setErrorPublicar('Elegí la dificultad del trabajo.'); return; }
     if (!coords) { setErrorPublicar('No pudimos obtener tu ubicación. Reintentá desde el mapa.'); return; }
+    if (!cotizacionToken || precio === null) {
+      setErrorPublicar(cotizando ? 'Esperá a que termine de calcularse el precio.' : 'No pudimos calcular el precio. Reintentá.');
+      if (!cotizando) pedirCotizacion();
+      return;
+    }
+    // Si la cotización venció, el precio puede haber cambiado: se recalcula y se le
+    // pide al empleador que lo revise antes de pagar, en vez de cobrar otro monto sin avisar.
+    if (!validaHasta || cotizacionVencida(validaHasta)) {
+      await pedirCotizacion();
+      setErrorPublicar('Actualizamos el precio. Revisalo y volvé a tocar "Ofrecer y pagar".');
+      return;
+    }
 
     setPublicando(true);
     try {
-      const { trabajo, pin } = await crearTrabajo({
+      const { trabajo, pin, pago } = await crearTrabajo({
         titulo: titulo.trim(),
         descripcion: descripcion.trim(),
-        categoria: CATEGORIAS[categoria],
-        nivelDificultad: dificultad,
-        precio,
-        latitud: coords.lat,
-        longitud: coords.lng,
+        cotizacionToken,
       });
 
       await guardarPinLocal(trabajo.id, pin);
@@ -135,6 +195,25 @@ export default function OfrecerTrabajoScreen() {
       setDescripcion('');
       setCategoria(null);
       setDificultad(null);
+      setCotizacion(null);
+      setCotizacionToken(null);
+
+      // Modo demo: el pago se hace en la pantalla de checkout de la app.
+      if (pago.simulado || !pago.checkoutUrl) {
+        router.push({
+          pathname: '/checkout',
+          params: { trabajoId: trabajo.id, monto: String(pago.monto), titulo: trabajo.titulo },
+        } as any);
+        return;
+      }
+
+      // Se espera a que el usuario vuelva del checkout (pague o no): el seguimiento
+      // consulta el estado del pago al abrirse.
+      try {
+        await abrirCheckout(pago.checkoutUrl);
+      } catch (e: any) {
+        console.log('No se pudo abrir el checkout:', e?.message);
+      }
 
       router.push({ pathname: '/seguimiento', params: { trabajoId: trabajo.id } } as any);
     } catch (e: any) {
@@ -291,7 +370,7 @@ export default function OfrecerTrabajoScreen() {
               return (
                 <Pressable
                   key={cat}
-                  onPress={() => setCategoria(i)}
+                  onPress={() => elegirCategoria(i)}
                   style={[
                     { width: 93, height: 86 },
                     // Única excepción a la sombra fina: seleccionada tiene spread 2 (más radio).
@@ -331,7 +410,7 @@ export default function OfrecerTrabajoScreen() {
                   <View key={d} className="flex-1 flex-row">
                     {idx > 0 && <View style={{ width: 1, backgroundColor: Paleta.neutro, opacity: 0.3 }} />}
                     <Pressable
-                      onPress={() => setDificultad(d)}
+                      onPress={() => elegirDificultad(d)}
                       className={`flex-1 items-center justify-center py-3 active:opacity-70 ${
                         sel ? 'bg-acento' : 'bg-white'
                       }`}>
@@ -343,19 +422,52 @@ export default function OfrecerTrabajoScreen() {
             </View>
           </View>
 
-          {/* Pago final */}
+          {/* Pago final: lo calcula el backend */}
           <View style={sombra(Paleta.acento)} className="rounded-xl bg-white px-5 py-5 mb-5">
             <Text className="text-base font-nunito-bold text-principal mb-1">Pago final:</Text>
-            <Text className="text-2xl font-nunito-bold text-principal">
-              {precio !== null ? `$${precio}` : 'Elegí la dificultad'}
-            </Text>
+            {cotizando ? (
+              <View className="flex-row items-center gap-2 py-1">
+                <ActivityIndicator size="small" color={Paleta.principal} />
+                <Text className="text-sm font-nunito text-neutro">Calculando precio…</Text>
+              </View>
+            ) : errorCotizacion ? (
+              <Pressable onPress={() => pedirCotizacion()} className="active:opacity-70">
+                <Text className="text-sm font-nunito text-error">{errorCotizacion}</Text>
+                <Text className="text-sm font-nunito-semi text-principal underline mt-1">Reintentar</Text>
+              </Pressable>
+            ) : (
+              <Text className="text-2xl font-nunito-bold text-principal">
+                {precio !== null
+                  ? `$${precio}`
+                  : categoria === null
+                  ? 'Elegí la categoría'
+                  : 'Elegí la dificultad'}
+              </Text>
+            )}
+            {cotizacion && !cotizando ? (
+              <View className="mt-1">
+                {cotizacion.desglose.multiplicadorDemanda > 1 ? (
+                  <Text className="text-xs font-nunito text-neutro">
+                    Incluye recargo por alta demanda en tu zona (×{cotizacion.desglose.multiplicadorDemanda}).
+                  </Text>
+                ) : null}
+                {cotizacion.desglose.multiplicadorHorario > 1 ? (
+                  <Text className="text-xs font-nunito text-neutro">
+                    Incluye recargo nocturno / de domingo (×{cotizacion.desglose.multiplicadorHorario}).
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
-          <Pressable
-            style={sombra(Paleta.neutro)}
-            className="items-center justify-center bg-white rounded-[10px] py-3.5 active:opacity-70">
-            <Text className="text-base font-nunito-bold text-principal">Configurar medio de pago</Text>
-          </Pressable>
+          {/* Medio de pago: lo elige el empleador en el checkout de MercadoPago */}
+          <View style={sombra(Paleta.neutro)} className="flex-row items-start bg-white rounded-[10px] px-4 py-3.5">
+            <MaterialIcons name="lock-outline" size={18} color={Paleta.principal} />
+            <Text className="flex-1 text-xs font-nunito text-neutro ml-2 leading-4">
+              Pagás con MercadoPago al publicar. Guardamos el pago hasta que el trabajo termine, y si
+              nadie lo toma te lo devolvemos completo.
+            </Text>
+          </View>
         </View>
 
         {errorPublicar ? (
@@ -371,7 +483,9 @@ export default function OfrecerTrabajoScreen() {
           {publicando ? (
             <ActivityIndicator color={Paleta.acento} />
           ) : (
-            <Text className="text-acento text-base font-nunito-bold">Ofrecer Trabajo</Text>
+            <Text className="text-acento text-base font-nunito-bold">
+              {precio !== null ? `Ofrecer y pagar $${precio}` : 'Ofrecer Trabajo'}
+            </Text>
           )}
         </Pressable>
       </VistaFormulario>

@@ -6,7 +6,9 @@ import { apiGet, apiPost } from '../auth';
 
 // 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
-export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// 'pago_pendiente': recién creado, todavía no se acreditó el pago en MercadoPago. No se
+// publica (nadie lo ve ni se notifica) hasta que pasa a 'pendiente'. Ver lib/pagos.ts.
+export type EstadoTrabajo = 'pago_pendiente' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type Trabajo = {
   id: string;
@@ -14,7 +16,12 @@ export type Trabajo = {
   descripcion: string;
   categoria: string;
   nivel_dificultad: string | null;
+  /** Lo que paga el empleador. Lo calcula el backend (ver cotizarTrabajo). */
   precio: number;
+  comision_porcentaje: number | null;
+  comision_monto: number | null;
+  /** Lo que recibe el trabajador: precio - comisión. */
+  monto_trabajador: number | null;
   estado: EstadoTrabajo;
   latitud: number;
   longitud: number;
@@ -27,17 +34,52 @@ export type Trabajo = {
   duracionSegundos?: number | null;
 };
 
+export type Cotizacion = {
+  precio: number;
+  comisionPorcentaje: number;
+  comisionMonto: number;
+  montoTrabajador: number;
+  desglose: {
+    base: number;
+    multiplicadorDificultad: number;
+    /** > 1 cuando hay más trabajos esperando que trabajadores libres en la zona. */
+    multiplicadorDemanda: number;
+    /** 1.2 de noche (22 a 7 hs) o los domingos. */
+    multiplicadorHorario: number;
+  };
+};
+
+// POST /api/trabajos/cotizar — el precio lo calcula el backend (categoría, dificultad,
+// demanda en la zona y horario). El token dura 10 minutos y es lo que hay que mandar
+// al crear el trabajo: así se cobra exactamente el precio que se mostró.
+export async function cotizarTrabajo(datos: {
+  categoria: string;
+  nivelDificultad: string;
+  latitud: number;
+  longitud: number;
+}): Promise<{ cotizacion: Cotizacion; cotizacionToken: string; validaHasta: string }> {
+  return apiPost('/api/trabajos/cotizar', datos);
+}
+
+/** True si la cotización ya venció o está por vencer (con 30s de margen para el request). */
+export function cotizacionVencida(validaHasta: string): boolean {
+  return new Date(validaHasta).getTime() - 30_000 < Date.now();
+}
+
 // POST /api/trabajos — el PIN devuelto solo viaja en esta respuesta, no se puede
 // volver a consultar después: hay que mostrárselo al empleador en el momento.
+// Categoría, dificultad, ubicación y precio salen de la cotización. El trabajo nace en
+// 'pago_pendiente': hay que abrir `pago.checkoutUrl` para pagarlo (lib/pagos.ts).
 export async function crearTrabajo(datos: {
   titulo: string;
   descripcion: string;
-  categoria: string;
-  nivelDificultad?: string | null;
-  precio: number;
-  latitud: number;
-  longitud: number;
-}): Promise<{ trabajo: Trabajo; pin: string }> {
+  cotizacionToken: string;
+}): Promise<{
+  trabajo: Trabajo;
+  pin: string;
+  /** `simulado`: no hay checkout real (checkoutUrl null); se paga desde la pantalla /checkout. */
+  pago: { estado: string; monto: number; checkoutUrl: string | null; simulado: boolean };
+}> {
   return apiPost('/api/trabajos', datos);
 }
 
@@ -68,8 +110,23 @@ export async function completarTrabajo(id: string): Promise<ResultadoCompletar> 
   return apiPost(`/api/trabajos/${id}/completar`);
 }
 
-/** Cancela un trabajo `pendiente` o `asignado`. Solo el empleador dueño. */
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
+export type ResultadoCancelar = {
+  /** Texto listo para mostrar, con lo que se devolvió. */
+  message: string;
+  reembolso: {
+    porcentaje: number;
+    monto: number;
+    /** 'pendiente' = MP no respondió; el backend lo reintenta solo. */
+    estado: 'sin_pago' | 'procesado' | 'pendiente';
+  };
+};
+
+/**
+ * Cancela un trabajo `pago_pendiente`, `pendiente` o `asignado`. Solo el empleador dueño.
+ * Reembolso: 100% si nadie lo aceptó o si el trabajador lo aceptó hace menos de 1:30 min;
+ * pasado eso, 80% (el 20% compensa al trabajador que ya estaba en camino).
+ */
+export async function cancelarTrabajo(id: string, motivo?: string): Promise<ResultadoCancelar> {
   return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
 }
 

@@ -1,9 +1,10 @@
-const { redis } = require('../config/redis')
+const { redis, redisDisponible } = require('../config/redis')
 
 const TTL_SEGUNDOS = 120
 const PREFIJO = 'ubicacion:trabajador:'
 
 async function guardarUbicacionEfimera(workerId, lat, lng) {
+  if (!redisDisponible()) return  // ya se avisó una vez en config/redis.js
   try {
     await redis.set(
       `${PREFIJO}${workerId}`,
@@ -16,6 +17,7 @@ async function guardarUbicacionEfimera(workerId, lat, lng) {
 }
 
 async function obtenerUbicacionEfimera(workerId) {
+  if (!redisDisponible()) return null
   try {
     const valor = await redis.get(`${PREFIJO}${workerId}`)
     return valor ? JSON.parse(valor) : null

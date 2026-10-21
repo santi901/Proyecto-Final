@@ -3,10 +3,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { misTrabajosAsignados, type EstadoTrabajo, type Trabajo } from '../../lib/trabajos';
+import { misTrabajosAsignados, montoTrabajador, type EstadoTrabajo, type Trabajo } from '../../lib/trabajos';
 import { Paleta } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
+  pago_pendiente: 'Esperando pago',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -16,6 +17,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
+  pago_pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
   pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
@@ -101,7 +103,7 @@ export default function MiTrabajoScreen() {
                 </View>
               </View>
               <Text className="text-[13px] font-nunito text-neutro">
-                {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''} · ${t.precio}
+                {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''} · ${montoTrabajador(t)}
               </Text>
 
               {paso ? (

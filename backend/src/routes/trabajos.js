@@ -1,25 +1,33 @@
 const express = require('express')
 const router  = express.Router()
 const {
-  crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
+  cotizarTrabajo, crearTrabajo, obtenerEstadoPago, simularPago, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
   obtenerCandidatos, cancelarTrabajo,
 } = require('../controllers/trabajosController')
 const { enviarMensaje, listarMensajes } = require('../controllers/mensajesController')
 const { obtenerUbicacionTrabajador } = require('../controllers/ubicacionController')
 const { autenticar, soloEmpleado, soloEmpleador } = require('../middleware/auth')
+const { validar, validarIdParam } = require('../middleware/validar')
+const { limites } = require('../middleware/seguridad')
+const esquemas = require('../validacion/esquemas')
+
+router.param('id', validarIdParam)
 
 router.get('/',                     autenticar, listarTrabajos)
 router.get('/mios',                 autenticar, misTrabajos)
+router.post('/cotizar',             autenticar, soloEmpleador, limites.cotizar, validar(esquemas.cotizar), cotizarTrabajo)
 router.get('/:id',                  autenticar, obtenerTrabajo)
-router.get('/:id/candidatos',       autenticar, soloEmpleador, obtenerCandidatos)
-router.post('/',                    autenticar, soloEmpleador, crearTrabajo)
+router.get('/:id/pago',             autenticar, soloEmpleador, obtenerEstadoPago)
+router.post('/:id/pago/simular',    autenticar, soloEmpleador, simularPago)
+router.get('/:id/candidatos',       autenticar, soloEmpleador, validar(esquemas.candidatosQuery, 'query'), obtenerCandidatos)
+router.post('/',                    autenticar, soloEmpleador, limites.crearTrabajo, validar(esquemas.crearTrabajo), crearTrabajo)
 router.post('/:id/aceptar',         autenticar, soloEmpleado,  aceptarTrabajo)
-router.post('/:id/validar-pin',     autenticar, soloEmpleado,  validarPinTrabajo)
+router.post('/:id/validar-pin',     autenticar, soloEmpleado,  limites.pin, validar(esquemas.validarPin), validarPinTrabajo)
 router.post('/:id/completar',       autenticar, completarTrabajo)
-router.post('/:id/cancelar',        autenticar, soloEmpleador, cancelarTrabajo)
-router.post('/:id/calificar',       autenticar, soloEmpleador, calificarTrabajo)
-router.post('/:id/mensajes',        autenticar, enviarMensaje)
+router.post('/:id/cancelar',        autenticar, soloEmpleador, validar(esquemas.cancelar), cancelarTrabajo)
+router.post('/:id/calificar',       autenticar, soloEmpleador, validar(esquemas.calificar), calificarTrabajo)
+router.post('/:id/mensajes',        autenticar, validar(esquemas.mensaje), enviarMensaje)
 router.get('/:id/mensajes',         autenticar, listarMensajes)
 router.get('/:id/ubicacion-trabajador', autenticar, soloEmpleador, obtenerUbicacionTrabajador)
 

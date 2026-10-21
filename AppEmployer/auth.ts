@@ -1,11 +1,37 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { fetchConTimeout } from './lib/fetchConTimeout';
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+// ── URLs de los backends ──────────────────────────────────────────────────────
+// En desarrollo, la IP de la PC cambia cada vez que se reconecta a la red (la del
+// colegio reparte una distinta), y con la IP vieja en .env.local todo da "Network
+// request timed out". Pero el teléfono ya sabe la IP correcta: es desde donde bajó el
+// bundle de Metro (Constants.expoConfig.hostUri, p. ej. "10.8.17.129:8081"). Así que
+// en desarrollo se usa esa IP con el puerto de .env.local.
+//
+// No se toca si: es un build de producción, la URL es https (backend desplegado o
+// túnel), o Metro no corre en una IP local (p. ej. `expo start --tunnel`).
+const HOST_PRIVADO = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+function hostDeMetro(): string | null {
+  if (!__DEV__) return null;
+  const host = Constants.expoConfig?.hostUri?.split(':')[0];
+  return host && HOST_PRIVADO.test(host) ? host : null;
+}
+
+function resolverUrl(urlEnv: string | undefined, puertoPorDefecto: number): string {
+  const host = hostDeMetro();
+  if (!urlEnv) return `http://${host ?? 'localhost'}:${puertoPorDefecto}`;
+  if (!host || !urlEnv.startsWith('http://')) return urlEnv;
+  const puerto = urlEnv.match(/:(\d+)(\/|$)/)?.[1] ?? String(puertoPorDefecto);
+  return `http://${host}:${puerto}`;
+}
+
+export const API_URL = resolverUrl(process.env.EXPO_PUBLIC_API_URL, 3000);
 
 // Backend de Nacho (NestJS). Solo se usa para lo que el de Nico no expone: registrar el
 // token de notificaciones push y ver la foto de evidencia de un trabajo.
-export const NACHO_API_URL = process.env.EXPO_PUBLIC_NACHO_API_URL ?? 'http://localhost:3001';
+export const NACHO_API_URL = resolverUrl(process.env.EXPO_PUBLIC_NACHO_API_URL, 3001);
 
 const K = {
   ACCESS:  'cg_access_token',

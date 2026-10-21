@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   Text,
@@ -24,64 +23,11 @@ import {
   formatearDuracion,
   type Trabajo,
 } from '../lib/trabajos';
-import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
+import { abrirCheckout, obtenerEstadoPago, type InfoPago } from '../lib/pagos';
+import { listarEvidencia, type Evidencia } from '../lib/evidencia';
+import FotoEvidencia from '../components/foto-evidencia';
 import { obtenerUbicacionTrabajador, type Coordenadas } from '../lib/ubicacion';
 import { Paleta, sombra } from '@/constants/theme';
-
-function fechaCorta(iso: string) {
-  const d = new Date(iso);
-  const dos = (n: number) => String(n).padStart(2, '0');
-  return `${dos(d.getDate())}/${dos(d.getMonth() + 1)} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
-}
-
-// Última foto de evidencia que subió el trabajador, o el aviso de que todavía no hay.
-function FotoEvidencia({ evidencias }: { evidencias: Evidencia[] | null }) {
-  const [noCargo, setNoCargo] = useState(false);
-  const ultima = evidencias?.[0] ?? null;
-  const url = ultima ? urlDeEvidencia(ultima) : null;
-
-  if (evidencias === null) {
-    return (
-      <View className="h-32 items-center justify-center">
-        <ActivityIndicator color={Paleta.principal} />
-      </View>
-    );
-  }
-
-  if (!ultima) {
-    return (
-      <View className="h-32 items-center justify-center px-6">
-        <MaterialIcons name="hourglass-empty" size={28} color={Paleta.neutro} />
-        <Text className="text-neutro text-sm font-nunito mt-2 text-center">
-          Todavía no hay foto del trabajador
-        </Text>
-      </View>
-    );
-  }
-
-  if (url && !noCargo) {
-    return (
-      <Image
-        source={{ uri: url }}
-        style={{ width: '100%', height: 220 }}
-        resizeMode="cover"
-        onError={() => setNoCargo(true)}
-      />
-    );
-  }
-
-  return (
-    <View className="h-32 items-center justify-center px-6">
-      <MaterialIcons name="photo" size={28} color={Paleta.principal} />
-      <Text className="text-principal text-sm font-nunito-semi mt-2 text-center">
-        El trabajador subió la foto ({fechaCorta(ultima.creado_en)})
-      </Text>
-      <Text className="text-neutro text-xs font-nunito mt-1 text-center">
-        No se pudo mostrar la imagen en la app.
-      </Text>
-    </View>
-  );
-}
 
 // Seguimiento / detalle del trabajo publicado, del lado del empleador:
 //   · mapa con el lugar del trabajo
@@ -115,6 +61,12 @@ export default function SeguimientoScreen() {
 
   const [confirmandoCancelar, setConfirmandoCancelar] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  /** Lo que respondió el backend al cancelar (incluye cuánto se devolvió). */
+  const [mensajeCancelacion, setMensajeCancelacion] = useState('');
+
+  // Pago con MercadoPago: solo se consulta mientras el trabajo está en 'pago_pendiente'.
+  const [pago, setPago] = useState<InfoPago | null>(null);
+  const [abriendoPago, setAbriendoPago] = useState(false);
 
   const [evidencias, setEvidencias] = useState<Evidencia[] | null>(null);
 
@@ -157,7 +109,19 @@ export default function SeguimientoScreen() {
 
     async function refrescar() {
       try {
-        const { trabajo: t } = await obtenerTrabajo(trabajoId!);
+        let { trabajo: t } = await obtenerTrabajo(trabajoId!);
+        // Mientras no se pagó, se le pregunta al backend por el pago (que a su vez le
+        // pregunta a MP): es lo que lo pasa a 'pendiente' si el webhook no llegó.
+        if (t.estado === 'pago_pendiente') {
+          try {
+            const r = await obtenerEstadoPago(trabajoId!);
+            if (!activo) return;
+            setPago(r.pago);
+            if (r.estadoTrabajo !== t.estado) ({ trabajo: t } = await obtenerTrabajo(trabajoId!));
+          } catch (e: any) {
+            console.log('No se pudo consultar el pago:', e?.message);
+          }
+        }
         if (!activo) return;
         setTrabajo(t);
         setAhora(Date.now());
@@ -251,13 +215,42 @@ export default function SeguimientoScreen() {
     }
   }
 
-  // Cancelar sólo se puede antes de que el trabajo arranque ('pendiente' o 'asignado');
-  // el backend lo rechaza una vez que está 'en_progreso'.
+  // Reabre el checkout de MP (si cerró el navegador sin pagar, o el pago fue rechazado)
+  // y al volver consulta si se acreditó.
+  async function handlePagar() {
+    if (pago?.simulado) {
+      router.push({
+        pathname: '/checkout',
+        params: { trabajoId: trabajoId!, monto: String(pago.monto), titulo: trabajo?.titulo ?? '', desde: 'seguimiento' },
+      } as any);
+      return;
+    }
+    if (!pago?.checkoutUrl) return;
+    setError('');
+    setAbriendoPago(true);
+    try {
+      await abrirCheckout(pago.checkoutUrl);
+      const r = await obtenerEstadoPago(trabajoId!);
+      setPago(r.pago);
+      if (r.estadoTrabajo !== 'pago_pendiente') {
+        const { trabajo: t } = await obtenerTrabajo(trabajoId!);
+        setTrabajo(t);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'No pudimos abrir MercadoPago.');
+    } finally {
+      setAbriendoPago(false);
+    }
+  }
+
+  // Cancelar sólo se puede antes de que el trabajo arranque ('pago_pendiente', 'pendiente'
+  // o 'asignado'); el backend lo rechaza una vez que está 'en_progreso'.
   async function handleCancelar() {
     setError('');
     setCancelando(true);
     try {
-      await cancelarTrabajo(trabajoId!);
+      const r = await cancelarTrabajo(trabajoId!);
+      setMensajeCancelacion(r.message);
       setTrabajo(t => (t ? { ...t, estado: 'cancelado' } : t));
       completadoRef.current = true; // terminal: no hace falta seguir refrescando
       setConfirmandoCancelar(false);
@@ -353,7 +346,7 @@ export default function SeguimientoScreen() {
         <Text className="text-principal text-base font-nunito-bold mb-2">Foto del trabajo terminado</Text>
         <View style={sombra(Paleta.acento)} className="rounded-xl mb-6">
           <View className="bg-white rounded-xl overflow-hidden">
-            <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+            <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} onReintentar={cargarEvidencia} />
           </View>
         </View>
 
@@ -426,8 +419,15 @@ export default function SeguimientoScreen() {
 
   const enProgreso = trabajo.estado === 'en_progreso';
   const cancelado = trabajo.estado === 'cancelado';
+  const esperandoPago = trabajo.estado === 'pago_pendiente';
   // El backend sólo deja cancelar antes de que el trabajo arranque.
-  const sePuedeCancelar = trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
+  const sePuedeCancelar = esperandoPago || trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
+  // Lo mismo que aplica el backend al cancelar (trabajosController.porcentajeReembolso).
+  const textoReembolso = esperandoPago
+    ? 'Todavía no pagaste, así que no se te cobra nada.'
+    : trabajo.estado === 'pendiente'
+    ? 'Como nadie lo aceptó todavía, te devolvemos el 100% del pago.'
+    : 'Si el trabajador lo aceptó hace menos de 1:30 min te devolvemos el 100%. Si no, el 80%: el 20% restante compensa al trabajador, que ya iba en camino.';
   const solicitudVencida =
     trabajo.estado === 'pendiente' &&
     !!trabajo.solicitud_expira_en &&
@@ -457,7 +457,7 @@ export default function SeguimientoScreen() {
             className={`w-2.5 h-2.5 rounded-full ${
               cancelado || solicitudVencida
                 ? 'bg-error'
-                : trabajo.estado === 'pendiente'
+                : trabajo.estado === 'pendiente' || esperandoPago
                 ? 'bg-neutro'
                 : 'bg-exito'
             }`}
@@ -465,6 +465,8 @@ export default function SeguimientoScreen() {
           <Text className="text-neutro text-xs font-nunito-semi uppercase tracking-wider">
             {cancelado
               ? 'Trabajo cancelado'
+              : esperandoPago
+              ? 'Esperando tu pago'
               : solicitudVencida
               ? 'Ningún trabajador lo tomó a tiempo'
               : trabajo.estado === 'pendiente'
@@ -484,6 +486,33 @@ export default function SeguimientoScreen() {
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
               La solicitud expiró sin que nadie la acepte. Podés publicar el trabajo de nuevo.
             </Text>
+          </View>
+        ) : null}
+
+        {/* Pago pendiente: el trabajo no se publica hasta que MP lo acredita */}
+        {esperandoPago ? (
+          <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4 mb-5">
+            <Text className="text-principal text-base font-nunito-bold mb-1">
+              Falta el pago de ${trabajo.precio}
+            </Text>
+            <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
+              Publicamos el trabajo apenas MercadoPago acredite el pago. Si ya pagaste, puede
+              tardar unos segundos en verse acá.
+            </Text>
+            {pago?.checkoutUrl || pago?.simulado ? (
+              <Pressable
+                onPress={handlePagar}
+                disabled={abriendoPago}
+                className="bg-principal rounded-xl py-4 items-center active:opacity-90">
+                {abriendoPago ? (
+                  <ActivityIndicator color={Paleta.acento} />
+                ) : (
+                  <Text className="text-acento text-base font-nunito-bold">Pagar con MercadoPago</Text>
+                )}
+              </Pressable>
+            ) : (
+              <ActivityIndicator color={Paleta.principal} />
+            )}
           </View>
         ) : null}
 
@@ -563,7 +592,7 @@ export default function SeguimientoScreen() {
 
             <View style={sombra(Paleta.acento)} className="rounded-xl mb-5">
               <View className="bg-white rounded-xl overflow-hidden">
-                <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} />
+                <FotoEvidencia key={evidencias?.[0]?.id ?? 'sin-foto'} evidencias={evidencias} onReintentar={cargarEvidencia} />
               </View>
             </View>
 
@@ -626,10 +655,11 @@ export default function SeguimientoScreen() {
               <Text className="text-principal text-base font-nunito-bold mb-1">
                 ¿Cancelar este trabajo?
               </Text>
-              <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
+              <Text className="text-neutro text-sm font-nunito mb-2 leading-5">
                 Se da de baja la publicación y, si ya había un trabajador asignado, se le avisa.
                 No se puede deshacer.
               </Text>
+              <Text className="text-principal text-sm font-nunito-semi mb-4 leading-5">{textoReembolso}</Text>
 
               <Pressable
                 onPress={handleCancelar}
@@ -661,8 +691,8 @@ export default function SeguimientoScreen() {
           <View style={sombra(Paleta.neutro)} className="flex-row items-start bg-fondo-suave rounded-xl px-4 py-3 mt-2">
             <MaterialIcons name="cancel" size={18} color={Paleta.error} />
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
-              Este trabajo está cancelado. Si todavía lo necesitás, publicalo de nuevo desde
-              &ldquo;Ofrecer trabajo&rdquo;.
+              {mensajeCancelacion || 'Este trabajo está cancelado.'}{' '}
+              Si todavía lo necesitás, publicalo de nuevo desde &ldquo;Ofrecer trabajo&rdquo;.
             </Text>
           </View>
         ) : null}

@@ -3,10 +3,18 @@ const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
 const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
 const { emitirFinTrabajo } = require('../realtime/socket')
+const { cotizar, firmarCotizacion, verificarCotizacion } = require('../services/preciosService')
+const { MINUTOS_PARA_PAGAR, pagosSimulados } = require('../services/mercadoPagoService')
+const pagos = require('../services/pagosService')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, comision_porcentaje, comision_monto, monto_trabajador, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
 
-const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
+const ESTADOS_CANCELABLES = ['pago_pendiente', 'pendiente', 'asignado']
+
+// Cancelar con un trabajador ya asignado: gratis dentro de esta ventana desde que
+// aceptó; pasada la ventana se retiene una parte como compensación al trabajador.
+const VENTANA_CANCELACION_GRATIS_SEG = 90
+const PENALIDAD_CANCELACION_PORCENTAJE = 20
 
 // Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí.
 const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
@@ -16,13 +24,36 @@ function calcularDuracionSegundos(trabajo) {
   return Math.round((new Date(trabajo.finalizado_en) - new Date(trabajo.iniciado_en)) / 1000)
 }
 
+// POST /api/trabajos/cotizar — el precio lo calcula el backend (preciosService).
+// Devuelve un token firmado con la cotización, que hay que mandar al crear el trabajo.
+async function cotizarTrabajo(req, res) {
+  const { id: usuarioId } = req.usuario
+  const { categoria, nivelDificultad, latitud, longitud } = req.body
+  const datos = { categoria, nivelDificultad, latitud, longitud }
+
+  try {
+    const cotizacion = await cotizar(datos)
+    const { token: cotizacionToken, validaHasta } = firmarCotizacion(usuarioId, datos, cotizacion)
+    res.json({ cotizacion, cotizacionToken, validaHasta })
+  } catch (error) {
+    console.error(`Error cotizando trabajo (usuarioId=${usuarioId}, categoria=${categoria}): ${error.message ?? error}`)
+    res.status(error.status ?? 500).json({ error: 'No se pudo calcular el precio, intentá de nuevo' })
+  }
+}
+
+// POST /api/trabajos — el trabajo nace en 'pago_pendiente' y no se publica (ni se
+// notifica a nadie) hasta que MP acredita el pago: ver pagosService.procesarPagoMp.
+// Categoría, dificultad, ubicación y precio salen de la cotización firmada, no del body.
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { titulo, descripcion, categoria, nivelDificultad, precio, latitud, longitud } = req.body
+  const { titulo, descripcion, cotizacionToken } = req.body
 
-  if (!titulo || !descripcion || !categoria || precio == null || latitud == null || longitud == null) {
-    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): faltan campos obligatorios.`)
-    return res.status(400).json({ error: 'Faltan campos: titulo, descripcion, categoria, precio, latitud, longitud' })
+  let cotizacion
+  try {
+    cotizacion = verificarCotizacion(cotizacionToken, usuarioId)
+  } catch (error) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): cotización inválida o vencida (${error.message}).`)
+    return res.status(400).json({ error: 'La cotización venció o no es válida. Volvé a calcular el precio.' })
   }
 
   // Buscar perfil del empleador
@@ -38,22 +69,29 @@ async function crearTrabajo(req, res) {
   const pinHash = await hashearPin(pin)
   const expira  = new Date(); expira.setHours(expira.getHours() + 24)
 
-  // Tiempo límite para que algún candidato acepte antes de que la solicitud expire.
-  const solicitudExpira = new Date(); solicitudExpira.setMinutes(solicitudExpira.getMinutes() + 15)
+  // Mientras está en 'pago_pendiente', solicitud_expira_en es el plazo para pagar
+  // (el poller lo cancela pasado ese tiempo). Al acreditarse el pago se reinicia
+  // con la ventana normal de 15 min para que algún candidato acepte.
+  const plazoPago = new Date(); plazoPago.setMinutes(plazoPago.getMinutes() + MINUTOS_PARA_PAGAR)
 
   const { data: trabajo, error } = await supabase
     .from('trabajos')
     .insert({
       empleador_id:         perfil.id,
-      titulo, descripcion, categoria,
-      nivel_dificultad:     nivelDificultad ?? null,
-      precio,
-      latitud,
-      longitud,
-      estado:               'pendiente',
+      titulo, descripcion,
+      categoria:            cotizacion.categoria,
+      nivel_dificultad:     cotizacion.nivelDificultad,
+      latitud:              cotizacion.latitud,
+      longitud:             cotizacion.longitud,
+      precio:               cotizacion.precio,
+      comision_porcentaje:  cotizacion.comisionPorcentaje,
+      comision_monto:       cotizacion.comisionMonto,
+      monto_trabajador:     cotizacion.montoTrabajador,
+      desglose_precio:      cotizacion.desglose,
+      estado:               'pago_pendiente',
       pin_hash:             pinHash,
       pin_expira_en:        expira.toISOString(),
-      solicitud_expira_en:  solicitudExpira.toISOString(),
+      solicitud_expira_en:  plazoPago.toISOString(),
     })
     .select(CAMPOS_PUBLICOS)
     .single()
@@ -63,11 +101,93 @@ async function crearTrabajo(req, res) {
     return res.status(500).json({ error: 'Error creando trabajo' })
   }
 
-  // PIN se retorna SOLO aquí — el empleador lo muestra al empleado al llegar
-  res.status(201).json({ trabajo, pin })
+  let pago
+  try {
+    pago = await pagos.iniciarCobro({ trabajo, empleadorId: perfil.id })
+  } catch (errorPago) {
+    // Rollback manual (sin transacción, igual que el registro): un trabajo sin
+    // forma de pagarlo no le sirve a nadie.
+    console.error(`Error iniciando cobro (trabajoId=${trabajo.id}): ${errorPago.message ?? errorPago}`)
+    await supabase.from('trabajos').delete().eq('id', trabajo.id)
+    return res.status(errorPago.status ?? 502).json({ error: 'No se pudo iniciar el pago con MercadoPago, intentá de nuevo' })
+  }
 
-  // No se espera esta llamada: no debe demorar la respuesta ni fallar la creación del trabajo.
-  notificarNuevoTrabajo(trabajo)
+  // PIN se retorna SOLO aquí — el empleador lo muestra al empleado al llegar
+  res.status(201).json({
+    trabajo,
+    pin,
+    pago: { estado: pago.estado, monto: pago.monto, checkoutUrl: pago.mp_checkout_url, simulado: pagosSimulados() },
+  })
+}
+
+// GET /api/trabajos/:id/pago — estado del cobro para el empleador dueño. Si
+// sigue pendiente le pregunta a MP (la app llama a esto al volver del checkout).
+async function obtenerEstadoPago(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, estado, empleador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (!perfil || trabajo.empleador_id !== perfil.id) {
+    console.error(`Consulta de pago rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+
+  const pago = await pagos.sincronizarPago(trabajoId)
+  if (!pago) return res.status(404).json({ error: 'Este trabajo no tiene un pago asociado' })
+
+  const { data: actualizado } = await supabase
+    .from('trabajos').select('estado').eq('id', trabajoId).maybeSingle()
+
+  res.json({
+    pago: {
+      estado:           pago.estado,
+      monto:            pago.monto,
+      montoReembolsado: pago.monto_reembolsado,
+      // Solo tiene sentido mientras se puede pagar.
+      checkoutUrl:      pago.estado === 'pendiente' ? pago.mp_checkout_url : null,
+      simulado:         pagosSimulados(),
+    },
+    estadoTrabajo: actualizado?.estado ?? trabajo.estado,
+  })
+}
+
+// POST /api/trabajos/:id/pago/simular — solo en modo simulado (ver mercadoPagoService):
+// lo llama la pantalla de checkout de la app al tocar "Pagar". Aprueba el pago como si
+// lo hubiera confirmado MP, y el trabajo pasa a 'pendiente' (publicado).
+async function simularPago(req, res) {
+  const { id: trabajoId } = req.params
+  const { id: usuarioId } = req.usuario
+
+  const { data: perfil } = await supabase
+    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+
+  const { data: trabajo } = await supabase
+    .from('trabajos').select('id, empleador_id').eq('id', trabajoId).maybeSingle()
+
+  if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  if (!perfil || trabajo.empleador_id !== perfil.id) {
+    console.error(`Pago simulado rechazado (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+  }
+
+  try {
+    const pago = await pagos.simularPagoAprobado(trabajoId)
+    const { data: actualizado } = await supabase
+      .from('trabajos').select('estado').eq('id', trabajoId).maybeSingle()
+    res.json({
+      pago: { estado: pago.estado, monto: pago.monto, montoReembolsado: pago.monto_reembolsado, checkoutUrl: null, simulado: true },
+      estadoTrabajo: actualizado?.estado,
+    })
+  } catch (error) {
+    console.error(`Pago simulado rechazado (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    res.status(error.status ?? 500).json({ error: error.message ?? 'No se pudo procesar el pago' })
+  }
 }
 
 async function listarTrabajos(req, res) {
@@ -180,12 +300,18 @@ async function aceptarTrabajo(req, res) {
     return res.status(409).json({ error: 'La solicitud para este trabajo expiró' })
   }
 
-  const { error } = await supabase
+  const { data: aceptado, error } = await supabase
     .from('trabajos')
-    .update({ trabajador_id: empleado.id, estado: 'asignado' })
+    .update({ trabajador_id: empleado.id, estado: 'asignado', asignado_en: new Date().toISOString() })
     .eq('id', trabajoId)
+    .eq('estado', 'pendiente')  // si otro lo aceptó (o se canceló) en el medio, no pisarlo
+    .select('id')
 
   if (error) return res.status(500).json({ error: 'Error aceptando trabajo' })
+  if (!aceptado?.length) {
+    console.error(`Aceptar trabajo rechazado (trabajoId=${trabajoId}): cambió de estado mientras se aceptaba.`)
+    return res.status(409).json({ error: 'El trabajo ya no está disponible' })
+  }
 
   res.json({ message: 'Trabajo aceptado. El empleador te dará el PIN para iniciar.' })
 
@@ -248,7 +374,7 @@ async function completarTrabajo(req, res) {
 
   const { data: trabajo } = await supabase
     .from('trabajos')
-    .select('id, estado, trabajador_id, empleador_id, iniciado_en, confirmado_empleado_en, confirmado_empleador_en')
+    .select('id, estado, trabajador_id, empleador_id, iniciado_en, confirmado_empleado_en, confirmado_empleador_en, monto_trabajador')
     .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
@@ -322,6 +448,12 @@ async function completarTrabajo(req, res) {
 
   emitirFinTrabajo(trabajoId, { estado: 'completado' })
 
+  // La plata retenida desde que se creó el trabajo pasa a deberse al trabajador.
+  if (trabajo.trabajador_id && trabajo.monto_trabajador) {
+    pagos.liberarPago({ trabajoId, empleadoId: trabajo.trabajador_id, montoTrabajador: trabajo.monto_trabajador })
+      .catch((e) => console.error(`Error liberando pago (trabajoId=${trabajoId}): ${e.message ?? e}`))
+  }
+
   const payload = {
     tipo:    'cambio_estado',
     titulo:  'Trabajo completado',
@@ -335,6 +467,18 @@ async function completarTrabajo(req, res) {
   }
 }
 
+// Qué parte del pago se le devuelve al empleador según el estado al cancelar.
+function porcentajeReembolso(trabajo) {
+  if (trabajo.estado !== 'asignado' || !trabajo.asignado_en) return 100
+  const segundosDesdeAsignado = (Date.now() - new Date(trabajo.asignado_en)) / 1000
+  return segundosDesdeAsignado <= VENTANA_CANCELACION_GRATIS_SEG ? 100 : 100 - PENALIDAD_CANCELACION_PORCENTAJE
+}
+
+// POST /api/trabajos/:id/cancelar — también es el endpoint de reembolso:
+//   pago_pendiente → se cancela, no hay nada que devolver
+//   pendiente      → reembolso del 100%
+//   asignado       → 100% dentro de los primeros 90s desde que el trabajador aceptó;
+//                    después 80%, y el 20% retenido se le liquida al trabajador.
 async function cancelarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId } = req.usuario
@@ -346,7 +490,7 @@ async function cancelarTrabajo(req, res) {
   if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
 
   const { data: trabajo } = await supabase
-    .from('trabajos').select('id, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
+    .from('trabajos').select('id, estado, empleador_id, trabajador_id, asignado_en').eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
   if (trabajo.empleador_id !== perfil.id) {
@@ -358,7 +502,12 @@ async function cancelarTrabajo(req, res) {
     return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
   }
 
-  const { error } = await supabase
+  // Se calcula antes del update: la ventana gratis corre hasta que el empleador tocó "cancelar".
+  const porcentaje = porcentajeReembolso(trabajo)
+
+  // Condicional sobre el estado leído: si el trabajador validó el PIN (o el
+  // poller lo canceló) en el medio, no se cancela ni se reembolsa.
+  const { data: cancelados, error } = await supabase
     .from('trabajos')
     .update({
       estado: 'cancelado',
@@ -367,13 +516,48 @@ async function cancelarTrabajo(req, res) {
       motivo_cancelacion: motivo ?? null,
     })
     .eq('id', trabajoId)
+    .eq('estado', trabajo.estado)
+    .select('id')
 
   if (error) {
     console.error(`Error cancelando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
     return res.status(500).json({ error: 'Error cancelando trabajo' })
   }
+  if (!cancelados?.length) {
+    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): el estado cambió mientras se cancelaba.`)
+    return res.status(409).json({ error: 'El trabajo cambió de estado, actualizá y probá de nuevo' })
+  }
 
-  res.json({ message: 'Trabajo cancelado' })
+  let reembolso
+  if (trabajo.estado === 'pago_pendiente') {
+    // Si justo terminó de pagar, procesarPagoMp ve el trabajo cancelado y reembolsa el 100%.
+    await pagos.cancelarPagoPendiente(trabajoId)
+    reembolso = { porcentaje: 0, monto: 0, estado: 'sin_pago' }
+  } else {
+    const resultado = await pagos.reembolsarTrabajo({ trabajoId, porcentaje })
+    reembolso = resultado.sinPago
+      ? { porcentaje: 0, monto: 0, estado: 'sin_pago' }
+      : { porcentaje, monto: resultado.monto, estado: resultado.ok ? 'procesado' : 'pendiente' }
+
+    // La parte retenida va para el trabajador que ya estaba en camino.
+    if (!resultado.sinPago && porcentaje < 100 && trabajo.trabajador_id) {
+      const pago = await pagos.obtenerPagoDeTrabajo(trabajoId)
+      await pagos.crearLiquidacion({
+        trabajoId,
+        empleadoId: trabajo.trabajador_id,
+        pagoId:     pago.id,
+        motivo:     'compensacion_cancelacion',
+        monto:      pago.monto - pagos.montoAReembolsar(pago, porcentaje),
+      })
+    }
+  }
+
+  const mensajes = {
+    sin_pago:  'Trabajo cancelado.',
+    procesado: `Trabajo cancelado. Te devolvimos $${reembolso.monto} (${reembolso.porcentaje}%).`,
+    pendiente: `Trabajo cancelado. El reembolso de $${reembolso.monto} se está procesando.`,
+  }
+  res.json({ message: mensajes[reembolso.estado], reembolso })
 
   emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
 
@@ -381,7 +565,9 @@ async function cancelarTrabajo(req, res) {
     notificarEmpleado(trabajo.trabajador_id, {
       tipo:    'cambio_estado',
       titulo:  'Trabajo cancelado',
-      mensaje: 'El empleador canceló este trabajo.',
+      mensaje: porcentaje < 100
+        ? 'El empleador canceló este trabajo. Vas a recibir una compensación por el traslado.'
+        : 'El empleador canceló este trabajo.',
       trabajoId,
     })
   }
@@ -485,7 +671,7 @@ async function calificarTrabajo(req, res) {
 }
 
 module.exports = {
-  crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
+  cotizarTrabajo, crearTrabajo, obtenerEstadoPago, simularPago, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
   obtenerCandidatos, cancelarTrabajo,
 }

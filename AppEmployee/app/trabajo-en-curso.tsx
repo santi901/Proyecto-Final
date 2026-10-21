@@ -21,6 +21,7 @@ import {
   completarTrabajo,
   formatearDuracion,
   type Trabajo,
+  montoTrabajador,
 } from '../lib/trabajos';
 import { subirEvidencia } from '../lib/evidencia';
 import { Paleta } from '@/constants/theme';
@@ -228,7 +229,7 @@ export default function TrabajoEnCursoScreen() {
           ¡Trabajo finalizado!
         </Text>
         <Text className="text-neutro text-sm font-nunito text-center leading-5">
-          El trabajo quedó completado y le avisamos al empleador. Se libera el pago de ${trabajo.precio}.
+          El trabajo quedó completado y le avisamos al empleador. Se libera el pago de ${montoTrabajador(trabajo)}.
         </Text>
         {trabajo.duracionSegundos ? (
           <Text className="text-neutro text-sm font-nunito text-center mt-1">
@@ -391,7 +392,7 @@ export default function TrabajoEnCursoScreen() {
               </Text>
               <Text className="text-neutro text-sm font-nunito text-center leading-5">
                 Ya marcaste el trabajo como terminado. Cuando el empleador lo confirme, se cierra
-                y se libera el pago de ${trabajo.precio}.
+                y se libera el pago de ${montoTrabajador(trabajo)}.
               </Text>
             </View>
           ) : confirmandoFin ? (
@@ -399,7 +400,7 @@ export default function TrabajoEnCursoScreen() {
               <Text className="text-principal text-base font-nunito-bold mb-1">¿Terminaste el trabajo?</Text>
               <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
                 Se sube la foto como evidencia y queda esperando que el empleador confirme.
-                Cuando confirme se cierra el trabajo y se libera el pago de ${trabajo.precio}.
+                Cuando confirme se cierra el trabajo y se libera el pago de ${montoTrabajador(trabajo)}.
               </Text>
 
               <Pressable
