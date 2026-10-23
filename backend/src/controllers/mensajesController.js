@@ -1,6 +1,8 @@
 const supabase = require('../config/supabase')
 const { esParticipanteTrabajo: esParticipante } = require('../utils/participantes')
 
+const ESTADOS_CON_CHAT = ['asignado', 'en_progreso']
+
 async function enviarMensaje(req, res) {
   const { id: trabajoId } = req.params
   const { mensaje } = req.body
@@ -20,10 +22,12 @@ async function enviarMensaje(req, res) {
     return res.status(403).json({ error: 'No participás de este trabajo' })
   }
 
-  // El chat solo está habilitado mientras el trabajo está activo (en_progreso);
-  // una vez completado, listar sigue funcionando como historial pero no se puede mandar más.
-  if (trabajo.estado !== 'en_progreso') {
-    return res.status(400).json({ error: 'El chat solo está habilitado mientras el trabajo está en progreso' })
+  // El chat se habilita apenas alguien acepta el trabajo (asignado) y sigue
+  // mientras está en curso; una vez completado/cancelado, listar sigue
+  // funcionando como historial pero no se puede mandar más.
+  if (!ESTADOS_CON_CHAT.includes(trabajo.estado)) {
+    console.error(`Mensaje rechazado (trabajoId=${trabajoId}): estado actual '${trabajo.estado}'.`)
+    return res.status(400).json({ error: 'El chat se habilita cuando alguien acepta el trabajo y se cierra al terminar' })
   }
 
   const { data: nuevoMensaje, error } = await supabase

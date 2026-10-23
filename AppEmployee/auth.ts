@@ -29,10 +29,6 @@ function resolverUrl(urlEnv: string | undefined, puertoPorDefecto: number): stri
 
 export const API_URL = resolverUrl(process.env.EXPO_PUBLIC_API_URL, 3000);
 
-// Backend de Nacho (NestJS). Solo se usa para lo que el de Nico no expone: registrar el
-// token de notificaciones push y subir la foto de evidencia de un trabajo.
-export const NACHO_API_URL = resolverUrl(process.env.EXPO_PUBLIC_NACHO_API_URL, 3001);
-
 const K = {
   ACCESS:  'cg_access_token',
   REFRESH: 'cg_refresh_token',
@@ -139,7 +135,7 @@ async function refrescarAccessToken(): Promise<string | null> {
 // servidor lo rechaza por vencido (403), refrescan y reintentan una sola vez.
 // Las usan `lib/trabajos.ts`, `lib/perfil.ts` y `lib/ubicacion.ts`.
 
-export async function fetchAutenticado(path: string, init: RequestInit = {}): Promise<Response> {
+export async function fetchAutenticado(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
   const conToken = (token: string | null) => ({
     ...init,
     headers: {
@@ -148,11 +144,11 @@ export async function fetchAutenticado(path: string, init: RequestInit = {}): Pr
     },
   });
 
-  let res = await fetchConTimeout(`${API_URL}${path}`, conToken(await getAccessToken()));
+  let res = await fetchConTimeout(`${API_URL}${path}`, conToken(await getAccessToken()), timeoutMs);
 
   if (res.status === 403) {
     const nuevoToken = await refrescarAccessToken();
-    if (nuevoToken) res = await fetchConTimeout(`${API_URL}${path}`, conToken(nuevoToken));
+    if (nuevoToken) res = await fetchConTimeout(`${API_URL}${path}`, conToken(nuevoToken), timeoutMs);
   }
 
   return res;

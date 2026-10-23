@@ -1,5 +1,8 @@
 const supabase = require('../config/supabase')
 
+// Devuelve true si usuarioId (con ese tipo) participa del trabajo dado, como
+// trabajador o como empleador. Se usa tanto para el chat (mensajesController)
+// como para autorizar el join a la room de un trabajo por WebSocket (realtime/socket.js).
 async function esParticipanteTrabajo(trabajo, usuarioId, tipo) {
   if (tipo === 'empleado') {
     const { data: empleado } = await supabase

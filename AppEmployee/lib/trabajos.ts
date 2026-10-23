@@ -29,6 +29,8 @@ export type Trabajo = {
   solicitud_expira_en: string | null;
   iniciado_en: string | null;
   finalizado_en: string | null;
+  /** Quién lo canceló, si está cancelado. Solo cuentan para la reputación los del trabajador. */
+  cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
   duracionSegundos?: number | null;
 };
@@ -94,6 +96,14 @@ export type ResultadoCompletar = {
   esperandoConfirmacion?: boolean;
   duracionSegundos?: number | null;
 };
+
+/**
+ * El trabajador se baja de un trabajo que aceptó. Solo antes de empezarlo (`asignado`), y
+ * cuenta para su tasa de cancelación: baja el score de reputación.
+ */
+export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
+}
 
 export async function completarTrabajo(id: string): Promise<ResultadoCompletar> {
   return apiPost(`/api/trabajos/${id}/completar`);

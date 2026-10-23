@@ -1,8 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { NACHO_API_URL, getUsuario } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import { fetchAutenticado, getUsuario } from '../auth';
 
 // Notificaciones push (Expo). Los backends ya arman y mandan un push en cada cambio de
 // estado de un trabajo, pero para entregarlo necesitan el Expo push token del usuario.
@@ -20,7 +19,7 @@ if (Platform.OS !== 'web') {
 }
 
 // Pide permiso, saca el Expo push token del dispositivo y lo registra para el usuario logueado:
-// POST {NACHO_API_URL}/notificaciones/registrar-token  body { usuarioId, expoPushToken }
+// POST /api/notificaciones/registrar-token  body { expoPushToken } (el usuario sale del JWT)
 export async function registrarNotificacionesPush(): Promise<void> {
   if (Platform.OS === 'web') return;
 
@@ -46,10 +45,10 @@ export async function registrarNotificacionesPush(): Promise<void> {
     projectId ? { projectId } : undefined,
   );
 
-  const res = await fetchConTimeout(`${NACHO_API_URL}/notificaciones/registrar-token`, {
+  const res = await fetchAutenticado('/api/notificaciones/registrar-token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ usuarioId: usuario.id, expoPushToken }),
+    body: JSON.stringify({ expoPushToken }),
   });
 
   if (!res.ok) {

@@ -1,5 +1,8 @@
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 const { v4: uuidv4 } = require('uuid')
+
+const URL_FIRMADA_EXPIRA_SEGUNDOS = 3600
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -22,4 +25,13 @@ async function guardarImagen(buffer, tipo, userId) {
   return nombreArchivo
 }
 
-module.exports = { guardarImagen }
+// El bucket es privado: la app necesita una URL firmada (temporal, 1h) para
+// poder mostrar la imagen — la key sola no es accesible desde afuera.
+async function obtenerUrlFirmada(key) {
+  return getSignedUrl(s3, new GetObjectCommand({
+    Bucket: process.env.AWS_BUCKET_NAME,
+    Key: key,
+  }), { expiresIn: URL_FIRMADA_EXPIRA_SEGUNDOS })
+}
+
+module.exports = { guardarImagen, obtenerUrlFirmada }

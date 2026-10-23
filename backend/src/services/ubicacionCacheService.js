@@ -1,8 +1,10 @@
 const { redis, redisDisponible } = require('../config/redis')
 
-const TTL_SEGUNDOS = 120
+const TTL_SEGUNDOS = 120 // la app manda ping cada 10s (ver AppEmployee/lib/ubicacion.ts) — 120s da margen de sobra
 const PREFIJO = 'ubicacion:trabajador:'
 
+// Best-effort: si Redis no está disponible esto no debe tirar la request abajo
+// (mismo criterio que notificar() en trabajosController.js).
 async function guardarUbicacionEfimera(workerId, lat, lng) {
   if (!redisDisponible()) return  // ya se avisó una vez en config/redis.js
   try {

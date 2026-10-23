@@ -3,10 +3,14 @@ const { notificarEmpleador, notificarNuevoTrabajo } = require('../services/notif
 const { emitirFinTrabajo } = require('../realtime/socket')
 const pagos = require('../services/pagosService')
 
-const INTERVALO_MS      = 5 * 60 * 1000
-const EXTENSION_MINUTOS = 15
-const MAX_REINTENTOS    = 3
+const INTERVALO_MS      = 5 * 60 * 1000  // cada cuánto se revisan trabajos vencidos
+const EXTENSION_MINUTOS = 15             // ventana nueva por cada reintento (misma que al crear el trabajo)
+const MAX_REINTENTOS    = 3              // después de esto se cancela solo
 
+// Sprint 3 — "Lógica de reasignación automática si nadie acepta en el tiempo límite".
+// pendiente + solicitud_expira_en vencida = nadie aceptó a tiempo. Se reintenta
+// unas cuantas veces (nueva ventana + se vuelve a notificar a los candidatos) y,
+// si se agotan los reintentos, se cancela el trabajo solo.
 async function procesarReasignaciones() {
   const { data: vencidos, error } = await supabase
     .from('trabajos')

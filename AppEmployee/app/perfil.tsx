@@ -11,6 +11,8 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SelectorCategorias from '../components/selector-categorias';
+import TarjetaReputacion from '../components/tarjeta-reputacion';
+import type { Reputacion } from '../lib/reputacion';
 import { obtenerPerfil, actualizarPerfil, type PerfilEmpleado } from '../lib/perfil';
 import { Paleta } from '@/constants/theme';
 
@@ -25,6 +27,7 @@ export default function PerfilScreen() {
   const insets = useSafeAreaInsets();
 
   const [perfil, setPerfil] = useState<PerfilEmpleado | null>(null);
+  const [reputacion, setReputacion] = useState<Reputacion | null>(null);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
@@ -44,9 +47,10 @@ export default function PerfilScreen() {
     let activo = true;
 
     obtenerPerfil()
-      .then(p => {
+      .then(({ perfil: p, reputacion: r }) => {
         if (!activo) return;
         setPerfil(p);
+        setReputacion(r);
         setForm({
           nombre: p.nombre ?? '',
           apellido: p.apellido ?? '',
@@ -163,6 +167,15 @@ export default function PerfilScreen() {
         </Pressable>
         <Text className="text-2xl font-nunito-bold text-principal">Mi cuenta</Text>
       </View>
+
+      {reputacion ? (
+        <>
+          <Text className="text-base font-nunito-bold text-principal mb-3">Mi reputación</Text>
+          <View className="mb-6">
+            <TarjetaReputacion reputacion={reputacion} conComentarios />
+          </View>
+        </>
+      ) : null}
 
       <Text className="text-base font-nunito-bold text-principal mb-3">Datos personales</Text>
 

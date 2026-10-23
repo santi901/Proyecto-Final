@@ -1,5 +1,9 @@
 const Redis = require('ioredis')
 
+// Almacenamiento efímero de ubicaciones (Sprint 4). Si no hay REDIS_URL o Redis
+// no está disponible, se loguea una sola vez y se sigue funcionando: igual que
+// notificar() en trabajosController, esto nunca debe frenar el flujo principal
+// (el upsert a la tabla worker_locations en Supabase sigue andando solo).
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379'
 const REINTENTO_MS = 30000
 

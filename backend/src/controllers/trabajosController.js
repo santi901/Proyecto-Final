@@ -6,8 +6,9 @@ const { emitirFinTrabajo } = require('../realtime/socket')
 const { cotizar, firmarCotizacion, verificarCotizacion } = require('../services/preciosService')
 const { MINUTOS_PARA_PAGAR, pagosSimulados } = require('../services/mercadoPagoService')
 const pagos = require('../services/pagosService')
+const { obtenerReputacion, actualizarReputacion } = require('../services/reputacionService')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, comision_porcentaje, comision_monto, monto_trabajador, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, comision_porcentaje, comision_monto, monto_trabajador, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en, cancelado_por'
 
 const ESTADOS_CANCELABLES = ['pago_pendiente', 'pendiente', 'asignado']
 
@@ -16,8 +17,10 @@ const ESTADOS_CANCELABLES = ['pago_pendiente', 'pendiente', 'asignado']
 const VENTANA_CANCELACION_GRATIS_SEG = 90
 const PENALIDAD_CANCELACION_PORCENTAJE = 20
 
-// Backend NestJS de Nacho: solo calificaciones sigue viviendo ahí.
-const NACHO_API_URL = process.env.NACHO_API_URL || 'http://localhost:3001'
+const MAX_LARGO_COMENTARIO = 500
+
+// Columnas que necesita el historial (Sprint 5): estado, fechas, duración y monto.
+const CAMPOS_HISTORIAL = 'id, titulo, categoria, estado, precio, monto_trabajador, creado_en, iniciado_en, finalizado_en, cancelado_en, cancelado_por'
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
@@ -264,6 +267,7 @@ async function misTrabajos(req, res) {
 
 async function obtenerTrabajo(req, res) {
   const { id: trabajoId } = req.params
+  const { tipo } = req.usuario
 
   const { data: trabajo } = await supabase
     .from('trabajos')
@@ -274,7 +278,22 @@ async function obtenerTrabajo(req, res) {
 
   const duracionSegundos = calcularDuracionSegundos(trabajo)
 
-  res.json({ trabajo: { ...trabajo, duracionSegundos } })
+  // Sprint 5: el empleador ve el nombre y la reputación del trabajador que lo tomó.
+  let trabajador = null
+  if (tipo === 'empleador' && trabajo.trabajador_id) {
+    const { data: empleado } = await supabase
+      .from('empleados').select('id, nombre, apellido, foto_url').eq('id', trabajo.trabajador_id).maybeSingle()
+    if (empleado) {
+      try {
+        const { promedio, score, cantidadCalificaciones, trabajosCompletados } = await obtenerReputacion(empleado.id)
+        trabajador = { ...empleado, reputacion: { promedio, score, cantidadCalificaciones, trabajosCompletados } }
+      } catch {
+        trabajador = { ...empleado, reputacion: null }
+      }
+    }
+  }
+
+  res.json({ trabajo: { ...trabajo, duracionSegundos, trabajador } })
 }
 
 async function aceptarTrabajo(req, res) {
@@ -368,6 +387,11 @@ async function validarPinTrabajo(req, res) {
   })
 }
 
+// Sprint 3 — "Confirmación de finalización por ambas partes antes de liberar el
+// pago": ninguna de las dos partes puede completar el trabajo unilateralmente.
+// Cada una llama este mismo endpoint (ya lo hacían ambas apps) y solo cuando
+// las dos confirmaron el estado pasa a 'completado' — recién ahí se habilita
+// calificar (que es, hoy, lo que gatea "liberar" algo en este proyecto).
 async function completarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId, tipo } = req.usuario
@@ -398,8 +422,7 @@ async function completarTrabajo(req, res) {
     }
   }
 
-  // No alcanza con que confirme una sola parte: hace falta que las dos
-  // marquen el trabajo como completado antes de cerrarlo.
+  // Idempotente: si esta misma parte ya había confirmado, no hace nada de nuevo.
   const yaConfirmoEstaParte = tipo === 'empleado' ? trabajo.confirmado_empleado_en : trabajo.confirmado_empleador_en
   if (yaConfirmoEstaParte) {
     return res.json({
@@ -414,6 +437,7 @@ async function completarTrabajo(req, res) {
   const otraParteYaConfirmo = tipo === 'empleado' ? trabajo.confirmado_empleador_en : trabajo.confirmado_empleado_en
 
   if (!otraParteYaConfirmo) {
+    // Primera confirmación: solo se registra, el trabajo sigue en_progreso.
     await supabase.from('trabajos').update({ [campoConfirmacion]: ahora }).eq('id', trabajoId)
 
     res.json({
@@ -436,6 +460,7 @@ async function completarTrabajo(req, res) {
     return
   }
 
+  // Segunda confirmación: ya confirmaron ambas partes, se cierra el trabajo.
   const finalizadoEn = ahora
   await supabase
     .from('trabajos')
@@ -468,42 +493,61 @@ async function completarTrabajo(req, res) {
 }
 
 // Qué parte del pago se le devuelve al empleador según el estado al cancelar.
-function porcentajeReembolso(trabajo) {
+// Si el que cancela es el trabajador, el empleador no tiene culpa: siempre 100%.
+function porcentajeReembolso(trabajo, canceladoPor) {
+  if (canceladoPor === 'empleado') return 100
   if (trabajo.estado !== 'asignado' || !trabajo.asignado_en) return 100
   const segundosDesdeAsignado = (Date.now() - new Date(trabajo.asignado_en)) / 1000
   return segundosDesdeAsignado <= VENTANA_CANCELACION_GRATIS_SEG ? 100 : 100 - PENALIDAD_CANCELACION_PORCENTAJE
 }
 
-// POST /api/trabajos/:id/cancelar — también es el endpoint de reembolso:
+// POST /api/trabajos/:id/cancelar — también es el endpoint de reembolso. El empleador
+// dueño puede cancelar mientras nadie empezó a trabajar (pago_pendiente/pendiente/asignado):
 //   pago_pendiente → se cancela, no hay nada que devolver
 //   pendiente      → reembolso del 100%
 //   asignado       → 100% dentro de los primeros 90s desde que el trabajador aceptó;
 //                    después 80%, y el 20% retenido se le liquida al trabajador.
+// El trabajador asignado también puede bajarse, solo en 'asignado' (reembolso del 100%).
+// Una vez validado el PIN (en_progreso) ya no se puede cancelar por acá.
 async function cancelarTrabajo(req, res) {
   const { id: trabajoId } = req.params
-  const { id: usuarioId } = req.usuario
-  const { motivo } = req.body
-
-  const { data: perfil } = await supabase
-    .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
-
-  if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+  const { id: usuarioId, tipo } = req.usuario
+  const { motivo } = req.body ?? {}
 
   const { data: trabajo } = await supabase
-    .from('trabajos').select('id, estado, empleador_id, trabajador_id, asignado_en').eq('id', trabajoId).maybeSingle()
+    .from('trabajos').select('id, titulo, estado, empleador_id, trabajador_id, asignado_en').eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
-  if (trabajo.empleador_id !== perfil.id) {
-    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
-    return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
-  }
-  if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
-    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
-    return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+
+  if (tipo === 'empleado') {
+    // Sprint 5: el trabajador puede bajarse de un trabajo que aceptó, pero solo antes
+    // de arrancarlo (asignado). Cuenta para su tasa de cancelación (reputacionService).
+    const { data: empleado } = await supabase
+      .from('empleados').select('id').eq('user_id', usuarioId).maybeSingle()
+    if (!empleado || trabajo.trabajador_id !== empleado.id) {
+      console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleado asignado.`)
+      return res.status(403).json({ error: 'No tenés asignado este trabajo' })
+    }
+    if (trabajo.estado !== 'asignado') {
+      console.error(`Cancelación de empleado rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}'.`)
+      return res.status(409).json({ error: 'Solo podés cancelar un trabajo antes de empezarlo' })
+    }
+  } else {
+    const { data: perfil } = await supabase
+      .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
+    if (!perfil) return res.status(400).json({ error: 'Completá tu perfil antes de cancelar trabajos' })
+    if (trabajo.empleador_id !== perfil.id) {
+      console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): no es el empleador dueño del trabajo.`)
+      return res.status(403).json({ error: 'No sos el empleador de este trabajo' })
+    }
+    if (!ESTADOS_CANCELABLES.includes(trabajo.estado)) {
+      console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
+      return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
+    }
   }
 
   // Se calcula antes del update: la ventana gratis corre hasta que el empleador tocó "cancelar".
-  const porcentaje = porcentajeReembolso(trabajo)
+  const porcentaje = porcentajeReembolso(trabajo, tipo)
 
   // Condicional sobre el estado leído: si el trabajador validó el PIN (o el
   // poller lo canceló) en el medio, no se cancela ni se reembolsa.
@@ -511,7 +555,7 @@ async function cancelarTrabajo(req, res) {
     .from('trabajos')
     .update({
       estado: 'cancelado',
-      cancelado_por: 'empleador',
+      cancelado_por: tipo === 'empleado' ? 'empleado' : 'empleador',
       cancelado_en: new Date().toISOString(),
       motivo_cancelacion: motivo ?? null,
     })
@@ -552,16 +596,24 @@ async function cancelarTrabajo(req, res) {
     }
   }
 
+  // El reembolso es para el empleador: al trabajador que se bajó no le corresponde ese mensaje.
   const mensajes = {
     sin_pago:  'Trabajo cancelado.',
     procesado: `Trabajo cancelado. Te devolvimos $${reembolso.monto} (${reembolso.porcentaje}%).`,
     pendiente: `Trabajo cancelado. El reembolso de $${reembolso.monto} se está procesando.`,
   }
-  res.json({ message: mensajes[reembolso.estado], reembolso })
+  res.json({ message: tipo === 'empleado' ? 'Cancelaste el trabajo.' : mensajes[reembolso.estado], reembolso })
 
   emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
 
-  if (trabajo.trabajador_id) {
+  if (tipo === 'empleado') {
+    notificarEmpleador(trabajo.empleador_id, {
+      tipo:    'cambio_estado',
+      titulo:  'El trabajador canceló',
+      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}". Te devolvimos el pago completo; podés volver a publicarlo.`,
+      trabajoId,
+    })
+  } else if (trabajo.trabajador_id) {
     notificarEmpleado(trabajo.trabajador_id, {
       tipo:    'cambio_estado',
       titulo:  'Trabajo cancelado',
@@ -573,6 +625,8 @@ async function cancelarTrabajo(req, res) {
   }
 }
 
+// Expone el matching portado (matchingService.js) para que el empleador pueda
+// ver quién matchea con su trabajo, sin esperar al ciclo de notificación.
 async function obtenerCandidatos(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId } = req.usuario
@@ -600,16 +654,25 @@ async function obtenerCandidatos(req, res) {
   }
 }
 
-// El empleador califica al empleado una vez completado el trabajo (empleados.reputacion
-// se recalcula del lado de Nacho — ver src/calificaciones — así que solo se califica
-// en ese sentido, no al revés).
+// El empleador califica al empleado una vez completado el trabajo. Portado del
+// backend NestJS (src/calificaciones): inserta en 'calificaciones' y recalcula
+// empleados.reputacion (promedio desnormalizado, que es lo que ordena el matching).
 async function calificarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId } = req.usuario
   const { puntaje, comentario } = req.body
 
   if (!Number.isInteger(puntaje) || puntaje < 1 || puntaje > 5) {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): puntaje inválido ${JSON.stringify(puntaje)}.`)
     return res.status(400).json({ error: 'El puntaje debe ser un entero entre 1 y 5' })
+  }
+  if (comentario != null && typeof comentario !== 'string') {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): comentario no es texto.`)
+    return res.status(400).json({ error: 'El comentario tiene que ser texto' })
+  }
+  if (comentario && comentario.trim().length > MAX_LARGO_COMENTARIO) {
+    console.error(`Calificación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): comentario de ${comentario.trim().length} caracteres.`)
+    return res.status(400).json({ error: `El comentario puede tener hasta ${MAX_LARGO_COMENTARIO} caracteres` })
   }
 
   const { data: perfil } = await supabase
@@ -632,10 +695,7 @@ async function calificarTrabajo(req, res) {
     return res.status(400).json({ error: 'Este trabajo no tiene trabajador asignado' })
   }
 
-  // Un trabajo se califica una sola vez. A diferencia de notificar(), esto NO
-  // es fire-and-forget: si no chequeamos esto acá (y esperamos la respuesta
-  // de Nacho más abajo), no hay forma de que el usuario sepa que su
-  // calificación se perdió o que ya había calificado este trabajo antes.
+  // Un trabajo se califica una sola vez.
   const { data: yaCalificado } = await supabase
     .from('calificaciones').select('id').eq('trabajo_id', trabajoId).maybeSingle()
 
@@ -643,35 +703,119 @@ async function calificarTrabajo(req, res) {
     return res.status(409).json({ error: 'Este trabajo ya fue calificado' })
   }
 
-  let respuestaNacho
-  try {
-    respuestaNacho = await fetch(`${NACHO_API_URL}/calificaciones`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        trabajoId,
-        calificadorId: perfil.id,
-        calificadoId:  trabajo.trabajador_id,
-        puntaje,
-        comentario,
-      }),
+  const { data: calificacion, error } = await supabase
+    .from('calificaciones')
+    .insert({
+      trabajo_id:     trabajoId,
+      calificador_id: perfil.id,
+      calificado_id:  trabajo.trabajador_id,
+      puntaje,
+      comentario:     comentario?.trim() || null,
     })
-  } catch (error) {
-    console.error(`Error mandando calificación (trabajoId=${trabajoId}): ${error.message}`)
-    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+    .select()
+    .single()
+
+  if (error) {
+    console.error(`Error guardando calificación (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
   }
 
-  if (!respuestaNacho.ok) {
-    const detalle = await respuestaNacho.json().catch(() => null)
-    console.error(`Calificación rechazada por Nacho (trabajoId=${trabajoId}): ${respuestaNacho.status} ${detalle?.message ?? ''}`)
-    return res.status(502).json({ error: 'No se pudo registrar la calificación, intentá de nuevo' })
+  let reputacion = null
+  try {
+    reputacion = await actualizarReputacion(trabajo.trabajador_id)
+  } catch {
+    // La calificación ya quedó guardada; la reputación se vuelve a calcular en la próxima consulta.
   }
 
-  res.json({ message: 'Calificación enviada' })
+  res.json({ message: 'Calificación enviada', calificacion, reputacion })
+
+  notificarEmpleado(trabajo.trabajador_id, {
+    tipo:    'calificacion',
+    titulo:  'Te calificaron',
+    mensaje: `Recibiste ${puntaje} estrella${puntaje === 1 ? '' : 's'} por tu último trabajo.`,
+    trabajoId,
+  })
+}
+
+// GET /api/trabajos/:id/calificacion — para que la app sepa si ya se calificó.
+async function obtenerCalificacion(req, res) {
+  const { id: trabajoId } = req.params
+  const { data, error } = await supabase
+    .from('calificaciones').select('id, puntaje, comentario, creado_en').eq('trabajo_id', trabajoId).maybeSingle()
+
+  if (error) {
+    console.error(`Error obteniendo calificación (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error obteniendo la calificación' })
+  }
+  res.json({ calificacion: data })
+}
+
+// GET /api/trabajos/historial — Sprint 5. Todos los trabajos del usuario (los que
+// tomó, si es empleado; los que publicó, si es empleador) con estado, fecha,
+// duración y ganancia, más un resumen. La "ganancia" de un trabajo completado es lo
+// que cobra el trabajador (monto_trabajador, precio menos comisión) o lo que pagó el
+// empleador (precio); los cancelados y los que siguen abiertos van con 0.
+async function historialTrabajos(req, res) {
+  const { id: usuarioId, tipo } = req.usuario
+
+  const tabla = tipo === 'empleado' ? 'empleados' : 'perfiles'
+  const columna = tipo === 'empleado' ? 'trabajador_id' : 'empleador_id'
+
+  const { data: perfil } = await supabase.from(tabla).select('id').eq('user_id', usuarioId).maybeSingle()
+  if (!perfil) return res.status(404).json({ error: 'Perfil no encontrado' })
+
+  const { data: filas, error } = await supabase
+    .from('trabajos').select(CAMPOS_HISTORIAL).eq(columna, perfil.id).order('creado_en', { ascending: false })
+
+  if (error) {
+    console.error(`Error armando historial (${columna}=${perfil.id}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error cargando el historial' })
+  }
+
+  const ids = (filas ?? []).map(t => t.id)
+  const { data: calificaciones, error: errorCal } = ids.length
+    ? await supabase.from('calificaciones').select('trabajo_id, puntaje, comentario').in('trabajo_id', ids)
+    : { data: [], error: null }
+  if (errorCal) console.error(`Error leyendo calificaciones del historial: ${errorCal.message ?? errorCal}`)
+  const calificacionPorTrabajo = Object.fromEntries((calificaciones ?? []).map(c => [c.trabajo_id, c]))
+
+  const trabajos = (filas ?? []).map(t => ({
+    id:               t.id,
+    titulo:           t.titulo,
+    categoria:        t.categoria,
+    estado:           t.estado,
+    precio:           t.precio,
+    fecha:            t.finalizado_en ?? t.cancelado_en ?? t.creado_en,
+    creado_en:        t.creado_en,
+    iniciado_en:      t.iniciado_en,
+    finalizado_en:    t.finalizado_en,
+    cancelado_por:    t.cancelado_por,
+    duracionSegundos: calcularDuracionSegundos(t),
+    ganancia:         t.estado === 'completado'
+      ? Number(tipo === 'empleado' ? t.monto_trabajador ?? t.precio : t.precio) || 0
+      : 0,
+    calificacion:     calificacionPorTrabajo[t.id] ?? null,
+  })).sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+
+  const completados = trabajos.filter(t => t.estado === 'completado')
+  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0, 0, 0, 0)
+
+  res.json({
+    trabajos,
+    resumen: {
+      total:                 trabajos.length,
+      completados:           completados.length,
+      cancelados:            trabajos.filter(t => t.estado === 'cancelado').length,
+      enCurso:               trabajos.filter(t => ['asignado', 'en_progreso'].includes(t.estado)).length,
+      gananciaTotal:         completados.reduce((s, t) => s + t.ganancia, 0),
+      gananciaMes:           completados.filter(t => new Date(t.fecha) >= inicioMes).reduce((s, t) => s + t.ganancia, 0),
+      duracionTotalSegundos: completados.reduce((s, t) => s + (t.duracionSegundos ?? 0), 0),
+    },
+  })
 }
 
 module.exports = {
   cotizarTrabajo, crearTrabajo, obtenerEstadoPago, simularPago, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
-  obtenerCandidatos, cancelarTrabajo,
+  cancelarTrabajo, obtenerCandidatos, obtenerCalificacion, historialTrabajos,
 }

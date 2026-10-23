@@ -1,8 +1,8 @@
 import { apiGet, apiPost } from '../auth';
 
 // Chat de un trabajo entre el trabajador y el empleador (backend de Nico,
-// `backend/src/controllers/mensajesController.js`). Solo se puede escribir mientras el
-// trabajo está `en_progreso`; antes y después se puede leer el historial.
+// `backend/src/controllers/mensajesController.js`). Se puede escribir desde que alguien
+// acepta el trabajo (`asignado`) hasta que termina (`en_progreso`); después queda el historial.
 
 export type Mensaje = {
   id: string;

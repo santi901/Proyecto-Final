@@ -1,8 +1,7 @@
-import { NACHO_API_URL } from '../auth';
-import { fetchConTimeout } from './fetchConTimeout';
+import { apiGet } from '../auth';
 
-// Fotos de evidencia que sube el trabajador al terminar. Las guarda el backend de Nacho en S3:
-// GET {NACHO_API_URL}/trabajos/:trabajoId/evidencia  → la más nueva primero
+// Fotos de evidencia que sube el trabajador al terminar. Las guarda el backend en S3:
+// GET /api/trabajos/:trabajoId/evidencia  → { evidencias } (la más nueva primero)
 
 export type Evidencia = {
   id: string;
@@ -29,8 +28,6 @@ export function urlDeEvidencia(evidencia: Evidencia): string | null {
 }
 
 export async function listarEvidencia(trabajoId: string): Promise<Evidencia[]> {
-  const res = await fetchConTimeout(`${NACHO_API_URL}/trabajos/${trabajoId}/evidencia`);
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message || `No se pudo cargar la evidencia (${res.status}).`);
-  return Array.isArray(data) ? data : [];
+  const { evidencias } = await apiGet(`/api/trabajos/${trabajoId}/evidencia`);
+  return Array.isArray(evidencias) ? evidencias : [];
 }

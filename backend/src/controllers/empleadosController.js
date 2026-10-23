@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase')
+const { obtenerReputacion } = require('../services/reputacionService')
 
 async function obtenerPerfil(req, res) {
   const { id } = req.usuario
@@ -11,7 +12,32 @@ async function obtenerPerfil(req, res) {
 
   if (!perfil) return res.status(404).json({ error: 'Perfil no encontrado' })
 
-  res.json({ perfil })
+  // Sprint 5: el perfil trae la reputación (promedio + score ponderado) para mostrarla.
+  let reputacion = null
+  try {
+    reputacion = await obtenerReputacion(perfil.id)
+  } catch {
+    // Si falla el cálculo, el perfil se puede editar igual.
+  }
+
+  res.json({ perfil, reputacion })
+}
+
+// GET /api/empleados/:id/reputacion — reputación de cualquier trabajador (empleados.id),
+// para que el empleador la vea antes/durante un trabajo.
+async function reputacionEmpleado(req, res) {
+  const { id: empleadoId } = req.params
+
+  const { data: empleado } = await supabase
+    .from('empleados').select('id, nombre, apellido, foto_url').eq('id', empleadoId).maybeSingle()
+
+  if (!empleado) return res.status(404).json({ error: 'Trabajador no encontrado' })
+
+  try {
+    res.json({ empleado, reputacion: await obtenerReputacion(empleadoId) })
+  } catch (error) {
+    res.status(error.status ?? 500).json({ error: error.message ?? 'Error calculando la reputación' })
+  }
 }
 
 async function actualizarPerfil(req, res) {
@@ -56,4 +82,4 @@ async function actualizarPerfil(req, res) {
   res.json({ perfil })
 }
 
-module.exports = { obtenerPerfil, actualizarPerfil }
+module.exports = { obtenerPerfil, actualizarPerfil, reputacionEmpleado }

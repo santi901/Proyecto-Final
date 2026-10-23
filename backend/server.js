@@ -10,6 +10,7 @@ const trabajosRoutes     = require('./src/routes/trabajos')
 const verificacionRoutes = require('./src/routes/verificacion')
 const ubicacionRoutes    = require('./src/routes/ubicacion')
 const pagosRoutes        = require('./src/routes/pagos')
+const notificacionesRoutes = require('./src/routes/notificaciones')
 const errorHandler       = require('./src/middleware/errorHandler')
 const { configurarProxy, forzarHttps, headersSeguridad, limites } = require('./src/middleware/seguridad')
 const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
@@ -41,15 +42,17 @@ app.use('/api/trabajos',     trabajosRoutes)
 app.use('/api/verificacion', verificacionRoutes)
 app.use('/api/ubicacion',    ubicacionRoutes)
 app.use('/api/pagos',        pagosRoutes)
+app.use('/api/notificaciones', notificacionesRoutes)
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
 app.use(errorHandler)
 
-iniciarReasignacionAutomatica()
-
+// http.Server explícito (en vez de app.listen) porque socket.io necesita
+// engancharse al mismo servidor HTTP que Express (Sprint 4 — WebSocket).
 const httpServer = http.createServer(app)
 configurarSocket(httpServer)
+iniciarReasignacionAutomatica()
 
 httpServer.listen(PORT, () => {
   console.log(`ChanguitApp backend corriendo en http://localhost:${PORT}`)

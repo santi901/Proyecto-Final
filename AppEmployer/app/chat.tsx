@@ -81,7 +81,7 @@ export default function ChatScreen() {
     }
   }
 
-  const puedeEscribir = trabajo?.estado === 'en_progreso';
+  const puedeEscribir = trabajo?.estado === 'asignado' || trabajo?.estado === 'en_progreso';
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: Paleta.fondo }} behavior="padding">
