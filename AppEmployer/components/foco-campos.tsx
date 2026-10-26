@@ -3,7 +3,7 @@ import {
   Dimensions,
   Keyboard,
   Platform,
-  ScrollView,
+  type ScrollViewInstance,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -47,7 +47,7 @@ type Opciones = {
  * handler de scroll.
  */
 export function useTecladoEnScroll({ alAbrirTeclado }: Opciones = {}) {
-  const refScroll = useRef<ScrollView>(null);
+  const refScroll = useRef<ScrollViewInstance>(null);
   /** Desplazamiento actual del scroll, para poder calcular a dónde hay que ir. */
   const desplazamiento = useRef(0);
   /** Último campo que tomó el foco. */

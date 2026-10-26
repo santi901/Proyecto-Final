@@ -3,6 +3,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
   type TextInputProps,
 } from 'react-native';
 import { Paleta, sombra } from '@/constants/theme';
@@ -34,7 +35,7 @@ export default function CampoTexto({
   style,
   ...props
 }: Props) {
-  const campo = useRef<TextInput>(null);
+  const campo = useRef<TextInputInstance>(null);
   const avisarFoco = useAvisarFoco();
 
   const alEnfocar: NonNullable<TextInputProps["onFocus"]> = evento => {

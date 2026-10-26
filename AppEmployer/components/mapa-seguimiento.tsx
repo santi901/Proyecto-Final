@@ -15,7 +15,8 @@ type Props = {
 // ni de una API key de Google), pero acá el pin del trabajador se mueve sin recargar el
 // mapa: el HTML se arma una sola vez y después se le inyecta la posición nueva.
 export default function MapaSeguimiento({ empleador, trabajador }: Props) {
-  const webRef = useRef<WebView>(null);
+  // `<object>`: con el default (`undefined`) las props de WebView quedan como `never`.
+  const webRef = useRef<WebView<object>>(null);
 
   const html = `
     <!DOCTYPE html>

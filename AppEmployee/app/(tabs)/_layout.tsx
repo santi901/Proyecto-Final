@@ -38,10 +38,13 @@ function Boton({ ruta, icono, activo, onPress }: {
   );
 }
 
-function CenterTabBar({ navigation, state }: BottomTabBarProps) {
+function CenterTabBar({ navigateToTab, state }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const rutaActual = state.routes[state.index]?.name;
-  const ir = (ruta: Ruta) => navigation.navigate(ruta);
+  const ir = (ruta: Ruta) => {
+    const destino = state.routes.find((r) => r.name === ruta);
+    if (destino) navigateToTab(destino.key);
+  };
 
   return (
     <View

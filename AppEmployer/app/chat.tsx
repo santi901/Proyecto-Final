@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,7 +38,7 @@ export default function ChatScreen() {
   const [error, setError] = useState('');
   const [texto, setTexto] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
 
   useEffect(() => {
     getUsuario().then(u => setUsuarioId(u?.id ?? ''));
