@@ -112,6 +112,7 @@ module.exports = {
     ...pagina,
     tipo:       z.enum(['empleado', 'empleador']).optional(),
     q:          z.string().trim().max(100).optional(),
+    suspendido: z.enum(['true', 'false']).optional(),
   }),
   trabajosAdminQuery: z.looseObject({
     ...pagina,
@@ -122,5 +123,13 @@ module.exports = {
     ...pagina,
     tipo:   z.enum(['pagos', 'liquidaciones']).optional(),
     estado: z.string().trim().max(30).optional(),
+  }),
+  suspension:   z.object({
+    suspendido: z.boolean(),
+    motivo:     opcional(z.string().trim().max(500)),
+  }).refine((d) => !d.suspendido || d.motivo, { message: 'Indicá el motivo de la suspensión', path: ['motivo'] }),
+  verificacion: z.object({
+    verificado: z.boolean(),
+    nota:       opcional(z.string().trim().max(500)),
   }),
 }

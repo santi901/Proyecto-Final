@@ -5,6 +5,7 @@ const {
   generarRefreshToken,
   verificarRefreshToken,
 } = require('../utils/jwt')
+const { estadoCuenta, mensajeSuspension } = require('../services/cuentasService')
 
 const SALT_ROUNDS = 12
 
@@ -180,6 +181,13 @@ async function login(req, res) {
     return res.status(401).json({ error: 'Credenciales inválidas' })
   }
 
+  // Solo después de validar la contraseña: si no, esto revelaría qué emails están suspendidos.
+  const cuenta = await estadoCuenta(usuario.id)
+  if (cuenta.suspendido) {
+    console.error(`Login rechazado (usuarioId=${usuario.id}): la cuenta está suspendida.`)
+    return res.status(403).json({ error: mensajeSuspension(cuenta.motivo), codigo: 'cuenta_suspendida' })
+  }
+
   const payload = { id: usuario.id, email: usuario.email, tipo: usuario.tipo_usuario }
   const { accessToken, refreshToken } = await crearTokens(payload)
 
@@ -205,6 +213,14 @@ async function refresh(req, res) {
 
   if (!stored || new Date(stored.expira_en) < new Date()) {
     return res.status(403).json({ error: 'Refresh token inválido o expirado' })
+  }
+
+  // Al suspender se borran los refresh tokens, pero esto cubre una sesión que se
+  // refresque justo en el medio.
+  const cuenta = await estadoCuenta(payload.id)
+  if (cuenta.suspendido) {
+    console.error(`Refresh rechazado (usuarioId=${payload.id}): la cuenta está suspendida.`)
+    return res.status(403).json({ error: mensajeSuspension(cuenta.motivo), codigo: 'cuenta_suspendida' })
   }
 
   const nuevoAccessToken = generarAccessToken({

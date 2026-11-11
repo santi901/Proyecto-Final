@@ -1,6 +1,6 @@
 const supabase = require('../config/supabase')
-// Errores de PostgREST/Postgres cuando una columna no existe.
-const faltaMigracion = (error) => ['42703', 'PGRST204'].includes(error?.code)
+const { notificar } = require('../services/notificacionesService')
+const { faltaMigracion } = require('../services/cuentasService')
 const { pagosSimulados } = require('../services/mercadoPagoService')
 
 // Panel de administración (rutas /api/admin/*, protegidas por soloAdmin con el header
@@ -89,13 +89,14 @@ async function resumen(req, res) {
 
 // GET /api/admin/usuarios?tipo=&q=&suspendido=
 async function listarUsuarios(req, res) {
-  const { tipo, q } = req.query
+  const { tipo, q, suspendido } = req.query
   const { pagina, porPagina, desde, hasta } = paginacion(req.query)
 
   // select('*') para no depender de las columnas nuevas; password_hash se descarta abajo.
   let consulta = supabase.from('usuarios').select('*', { count: 'exact' }).order('email').range(desde, hasta)
   if (tipo)       consulta = consulta.eq('tipo_usuario', tipo)
   if (q)          consulta = consulta.ilike('email', `%${escaparLike(q)}%`)
+  if (suspendido) consulta = consulta.eq('suspendido', suspendido === 'true')
 
   const { data, count, error } = await consulta
   if (error) return responderError(res, 'el listado de usuarios', error)
@@ -109,6 +110,12 @@ async function listarUsuarios(req, res) {
       email:            u.email,
       tipo:             u.tipo_usuario,
       creadoEn:         u.creado_en ?? u.created_at ?? null,
+      suspendido:       u.suspendido === true,
+      suspendidoMotivo: u.suspendido_motivo ?? null,
+      suspendidoEn:     u.suspendido_en ?? null,
+      verificado:       u.verificado === true,
+      verificadoEn:     u.verificado_en ?? null,
+      verificadoNota:   u.verificado_nota ?? null,
       perfil: p ? {
         id:         p.id,
         nombre:     p.nombre,
@@ -121,6 +128,70 @@ async function listarUsuarios(req, res) {
   })
 
   res.json({ usuarios, total: count ?? usuarios.length, pagina, porPagina })
+}
+
+// POST /api/admin/usuarios/:id/suspension { suspendido, motivo }
+// Suspender corta el acceso: se borran sus refresh tokens (la sesión muere cuando vence
+// el access token, 15 min como mucho), el login y el refresh lo rechazan, y deja de
+// recibir ofertas (matchingService). No toca los trabajos que ya tenga en curso.
+async function cambiarSuspension(req, res) {
+  const { id: usuarioId } = req.params
+  const { suspendido, motivo } = req.body
+
+  const { data: actualizados, error } = await supabase
+    .from('usuarios')
+    .update({
+      suspendido,
+      suspendido_motivo: suspendido ? motivo : null,
+      suspendido_en:     suspendido ? new Date().toISOString() : null,
+    })
+    .eq('id', usuarioId)
+    .select('id, email, suspendido, suspendido_motivo, suspendido_en')
+
+  if (error) return responderError(res, 'la suspensión', error)
+  if (!actualizados?.length) return res.status(404).json({ error: 'Usuario no encontrado' })
+
+  if (suspendido) {
+    const { error: errorTokens } = await supabase.from('refresh_tokens').delete().eq('usuario_id', usuarioId)
+    if (errorTokens) console.error(`Error revocando sesiones del usuario suspendido (usuarioId=${usuarioId}): ${errorTokens.message ?? errorTokens}`)
+  }
+
+  console.error(`Admin: usuario ${suspendido ? 'suspendido' : 'reactivado'} (usuarioId=${usuarioId}${suspendido ? `, motivo=${motivo}` : ''}).`)
+  res.json({ usuario: actualizados[0] })
+
+  notificar(usuarioId, {
+    tipo:    'cuenta',
+    titulo:  suspendido ? 'Cuenta suspendida' : 'Cuenta reactivada',
+    mensaje: suspendido ? `Suspendimos tu cuenta: ${motivo}` : 'Tu cuenta volvió a estar activa. Ya podés ingresar.',
+  })
+}
+
+// POST /api/admin/usuarios/:id/verificacion { verificado, nota }
+// Verificación manual de identidad: para cuando Rekognition no pudo (foto borrosa, DNI
+// viejo) y un admin revisó los documentos a mano, o para quitarla si hubo un problema.
+async function cambiarVerificacion(req, res) {
+  const { id: usuarioId } = req.params
+  const { verificado, nota } = req.body
+
+  const { data: actualizados, error } = await supabase
+    .from('usuarios')
+    .update({
+      verificado,
+      verificado_en:   verificado ? new Date().toISOString() : null,
+      verificado_nota: nota || null,
+    })
+    .eq('id', usuarioId)
+    .select('id, email, verificado, verificado_en, verificado_nota')
+
+  if (error) return responderError(res, 'la verificación', error)
+  if (!actualizados?.length) return res.status(404).json({ error: 'Usuario no encontrado' })
+
+  console.error(`Admin: verificación ${verificado ? 'aprobada' : 'quitada'} (usuarioId=${usuarioId}).`)
+  res.json({ usuario: actualizados[0] })
+
+  if (verificado) {
+    notificar(usuarioId, { tipo: 'cuenta', titulo: 'Identidad verificada', mensaje: 'Revisamos tus datos y tu identidad quedó verificada.' })
+  }
 }
 
 // GET /api/admin/trabajos?estado=&categoria=
@@ -201,6 +272,6 @@ async function listarTransacciones(req, res) {
 }
 
 module.exports = {
-  resumen, listarUsuarios,
+  resumen, listarUsuarios, cambiarSuspension, cambiarVerificacion,
   listarTrabajos, listarTransacciones,
 }

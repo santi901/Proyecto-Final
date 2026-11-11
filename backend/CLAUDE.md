@@ -43,8 +43,9 @@ src/validacion/esquemas.js            zod schemas for every request body/query (
 src/middleware/validar.js             validar(schema[, 'query']) + validarIdParam (router.param uuid check)
 src/middleware/seguridad.js           helmet, HTTPS enforcement / trust proxy, per-route rate limiters
 src/middleware/admin.js               soloAdmin: shared-secret header x-admin-key (there is no admin user type)
-src/controllers/adminController.js    /api/admin/*: summary, users, jobs, transactions
+src/controllers/adminController.js    /api/admin/*: summary, users (suspend/verify), jobs, transactions
 public/admin/                         admin panel UI (plain HTML + JS, no build), served at GET /admin
+src/services/cuentasService.js        account state (suspension), tolerant of the suspension columns being missing
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
 src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
@@ -106,9 +107,11 @@ Commission is tiered on the final price (15% up to $5.000, 12% up to $10.000, 10
 
 ### Administración
 
-`/api/admin/*` (`routes/admin.js`): `soloAdmin` + `limites.admin` (counts only 403s, so the key can't be brute-forced). `GET /resumen`, `GET /usuarios?tipo=&q=`, `GET /trabajos?estado=&categoria=`, `GET /transacciones?tipo=pagos|liquidaciones&estado=`, all paginated (`pagina`, `porPagina`). Liquidaciones are still marked paid through the older `/api/pagos/admin/liquidaciones/:id/pagar`.
+`/api/admin/*` (`routes/admin.js`): `soloAdmin` + `limites.admin` (counts only 403s, so the key can't be brute-forced). `GET /resumen`, `GET /usuarios?tipo=&q=&suspendido=`, `GET /trabajos?estado=&categoria=`, `GET /transacciones?tipo=pagos|liquidaciones&estado=`, all paginated (`pagina`, `porPagina`); `POST /usuarios/:id/suspension { suspendido, motivo }`, `POST /usuarios/:id/verificacion { verificado, nota }`. Liquidaciones are still marked paid through the older `/api/pagos/admin/liquidaciones/:id/pagar`.
 
 The panel UI (`public/admin/`) is static and served without auth — the key is typed in the page, kept in `sessionStorage` and sent as `x-admin-key`. It gets its own CSP (`CSP_PANEL_ADMIN` in `seguridad.js`) because helmet's default includes `upgrade-insecure-requests`, which breaks loading `panel.js` over plain `http://localhost`. No inline scripts or `on*=` attributes (CSP), and API data is only ever inserted with `textContent`.
+
+**Suspension** (`cuentasService.js`): login (after the password check, so it doesn't leak which emails are suspended) and refresh return 403 `{ codigo: 'cuenta_suspendida' }`; suspending also deletes the user's refresh tokens, so an open session dies when its access token expires (≤ `JWT_EXPIRES_IN`) — `autenticar` doesn't hit the DB per request. Suspended workers are filtered out of `matchingService`. Jobs already in progress aren't touched. **Verification** (`usuarios.verificado`) is set only by an admin; it's shown in the panel but isn't sent in the auth payload, because `AppEmployee/(tabs)/buscar.tsx` blocks the app when `usuario.verificado === false` and every existing user would start as `false`.
 
 ### Seguridad
 

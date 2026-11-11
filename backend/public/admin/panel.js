@@ -196,14 +196,42 @@ const VISTAS = {
       el('td', {}, u.email, el('div', { className: 'suave' }, corto(u.id))),
       el('td', {}, u.tipo),
       el('td', {}, u.perfil ? `${u.perfil.nombre ?? ''} ${u.perfil.apellido ?? ''}` : el('span', { className: 'suave' }, 'sin perfil')),
-      el('td', {}, u.perfil?.dni ?? '—')));
+      el('td', {}, u.perfil?.dni ?? '—'),
+      el('td', {}, u.verificado ? chip('verificado', 'ok') : chip('sin verificar', '')),
+      el('td', { className: 'largo' }, u.suspendido
+        ? [chip('suspendido', 'error'), el('div', { className: 'suave' }, u.suspendidoMotivo ?? '')]
+        : chip('activo', 'ok')),
+      el('td', {}, el('div', { className: 'acciones' },
+        u.verificado
+          ? botonAccion('Quitar verificación', async () => {
+            await api(`/api/admin/usuarios/${u.id}/verificacion`, { method: 'POST', body: { verificado: false } });
+            return `Se quitó la verificación de ${u.email}.`;
+          })
+          : botonAccion('Verificar', async () => {
+            const nota = prompt(`Verificar a ${u.email}. Nota (opcional): qué documentación revisaste`);
+            if (nota === null) return false;
+            await api(`/api/admin/usuarios/${u.id}/verificacion`, { method: 'POST', body: { verificado: true, nota: nota || null } });
+            return `${u.email} quedó verificado.`;
+          }),
+        u.suspendido
+          ? botonAccion('Reactivar', async () => {
+            await api(`/api/admin/usuarios/${u.id}/suspension`, { method: 'POST', body: { suspendido: false } });
+            return `${u.email} fue reactivado.`;
+          })
+          : botonAccion('Suspender', async () => {
+            const motivo = prompt(`Motivo de la suspensión de ${u.email} (se le muestra al usuario):`);
+            if (!motivo) return false;
+            await api(`/api/admin/usuarios/${u.id}/suspension`, { method: 'POST', body: { suspendido: true, motivo } });
+            return `${u.email} fue suspendido.`;
+          }, { peligro: true })))));
 
     return el('div', {},
       el('div', { className: 'filtros' },
         buscador,
-        selectorFiltro('tipo', 'Tipo', ['empleado', 'empleador'])),
+        selectorFiltro('tipo', 'Tipo', ['empleado', 'empleador']),
+        selectorFiltro('suspendido', 'Suspendido', ['true', 'false'])),
       el('div', { className: 'tarjeta' },
-        tabla(['Email', 'Tipo', 'Nombre', 'DNI'], filas),
+        tabla(['Email', 'Tipo', 'Nombre', 'DNI', 'Identidad', 'Estado', ''], filas),
         paginador(r.total)));
   },
 

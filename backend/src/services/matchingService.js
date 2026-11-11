@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase')
 const { calcularDistanciaKm } = require('../utils/haversine')
 const { obtenerReputaciones } = require('./reputacionService')
+const { idsSuspendidos } = require('./cuentasService')
 
 const RADIO_BUSQUEDA_DEFAULT_KM = 10
 const ESTADOS_TRABAJO_ACTIVO = ['asignado', 'en_progreso']
@@ -56,9 +57,11 @@ async function buscarTrabajadoresCerca(trabajo, radioKm) {
   }
 
   const idsOcupados = new Set((ocupados ?? []).map((t) => t.trabajador_id))
+  // Una cuenta suspendida desde el panel de admin no recibe ofertas nuevas.
+  const suspendidos = await idsSuspendidos((candidatos ?? []).map((c) => c.user_id))
 
   const enRango = (candidatos ?? [])
-    .filter((candidato) => !idsOcupados.has(candidato.id))
+    .filter((candidato) => !idsOcupados.has(candidato.id) && !suspendidos.has(candidato.user_id))
     .map((candidato) => ({
       id:            candidato.id,
       userId:        candidato.user_id,
