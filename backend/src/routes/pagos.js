@@ -1,7 +1,7 @@
 const express = require('express')
 const router  = express.Router()
 const {
-  recibirWebhook, retornoCheckout, misLiquidaciones, listarLiquidacionesAdmin, marcarLiquidacionPagada,
+  recibirWebhook, retornoCheckout, misLiquidaciones, listarLiquidacionesAdmin, marcarLiquidacionPagada, historialPagos,
 } = require('../controllers/pagosController')
 const { autenticar, soloEmpleado } = require('../middleware/auth')
 const { soloAdmin } = require('../middleware/admin')
@@ -15,6 +15,7 @@ router.post('/webhook', recibirWebhook)
 router.get('/retorno',  retornoCheckout)
 
 router.get('/mis-liquidaciones', autenticar, soloEmpleado, misLiquidaciones)
+router.get('/historial',         autenticar, historialPagos)
 
 // Admin (header x-admin-key): transferencias manuales a los trabajadores.
 router.get('/admin/liquidaciones',            soloAdmin, validar(esquemas.liquidacionesQuery, 'query'), listarLiquidacionesAdmin)
