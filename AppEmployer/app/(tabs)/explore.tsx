@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { misTrabajosPublicados, obtenerPinLocal, type EstadoTrabajo, type Trabajo } from '../../lib/trabajos';
+import { formatearProgramacion, programacionesDe } from '../../lib/programados';
 import { Paleta, sombra } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
@@ -29,6 +30,10 @@ const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string; sombra?
 // (el empleado lo necesita para pasar de 'asignado' a 'en_progreso').
 const ESTADOS_CON_PIN: EstadoTrabajo[] = ['pendiente', 'asignado'];
 
+// "Próximos trabajos" (Sprint 6): los que todavía no terminaron. Primero los que están en
+// curso, después los programados por fecha y al final los que esperan trabajador.
+const ESTADOS_PROXIMOS: EstadoTrabajo[] = ['pago_pendiente', 'pendiente', 'asignado', 'en_progreso'];
+
 function proximoPaso(t: Trabajo): string {
   if (t.estado === 'pendiente') {
     const vencida = !!t.solicitud_expira_en && new Date(t.solicitud_expira_en).getTime() < Date.now();
@@ -53,6 +58,7 @@ export default function MisTrabajosScreen() {
   const [error, setError] = useState('');
   const [pins, setPins] = useState<Record<string, string | null>>({});
   const [pinVisible, setPinVisible] = useState<Record<string, boolean>>({});
+  const [programados, setProgramados] = useState<Record<string, string>>({});
 
   const cargar = useCallback(async () => {
     setError('');
@@ -66,6 +72,7 @@ export default function MisTrabajosScreen() {
           .map(async t => [t.id, await obtenerPinLocal(t.id)] as const),
       );
       setPins(Object.fromEntries(entradas));
+      setProgramados(await programacionesDe(trabajos.filter(t => ESTADOS_PROXIMOS.includes(t.estado)).map(t => t.id)));
     } catch (e: any) {
       setError(e?.message || 'No pudimos cargar tus trabajos.');
     }
@@ -111,7 +118,35 @@ export default function MisTrabajosScreen() {
           </View>
         )}
 
-        {trabajos?.map(t => {
+        {trabajos && trabajos.length > 0 ? (() => {
+          const orden = (t: Trabajo) =>
+            t.estado === 'en_progreso' ? 0 : t.estado === 'asignado' ? 1 : programados[t.id] ? 2 : 3;
+          const proximos = trabajos
+            .filter(t => ESTADOS_PROXIMOS.includes(t.estado))
+            .sort((a, b) => orden(a) - orden(b)
+              || new Date(programados[a.id] ?? a.creado_en).getTime() - new Date(programados[b.id] ?? b.creado_en).getTime());
+          const anteriores = trabajos.filter(t => !ESTADOS_PROXIMOS.includes(t.estado));
+          return (
+            <>
+              <View className="flex-row items-center mb-2 mt-1">
+                <MaterialIcons name="event" size={18} color={Paleta.principal} />
+                <Text className="text-base font-nunito-bold text-principal ml-1.5">Próximos trabajos</Text>
+              </View>
+              {proximos.length === 0 ? (
+                <Text className="text-neutro text-sm font-nunito mb-4">No tenés trabajos pendientes ni programados.</Text>
+              ) : proximos.map(renderTarjeta)}
+              {anteriores.length > 0 ? (
+                <Text className="text-base font-nunito-bold text-principal mb-2 mt-4">Anteriores</Text>
+              ) : null}
+              {anteriores.map(renderTarjeta)}
+            </>
+          );
+        })() : null}
+      </ScrollView>
+    </View>
+  );
+
+  function renderTarjeta(t: Trabajo) {
           const chip = ESTADO_CHIP[t.estado];
           const pin = pins[t.id];
           return (
@@ -131,6 +166,13 @@ export default function MisTrabajosScreen() {
               <Text className="text-[13px] font-nunito text-neutro">
                 {t.categoria}{t.nivel_dificultad ? ` · ${t.nivel_dificultad}` : ''} · ${t.precio}
               </Text>
+
+              {programados[t.id] && ESTADOS_PROXIMOS.includes(t.estado) ? (
+                <View className="flex-row items-center self-start bg-acento rounded-full px-2.5 py-1 mt-2">
+                  <MaterialIcons name="event" size={13} color={Paleta.principal} />
+                  <Text className="text-[11px] font-nunito-bold text-principal ml-1">{formatearProgramacion(programados[t.id])}</Text>
+                </View>
+              ) : null}
 
               <View className="flex-row items-center mt-3">
                 <Text className="flex-1 text-[13px] font-nunito-semi text-principal">{proximoPaso(t)}</Text>
@@ -153,8 +195,5 @@ export default function MisTrabajosScreen() {
               ) : null}
             </Pressable>
           );
-        })}
-      </ScrollView>
-    </View>
-  );
+  }
 }

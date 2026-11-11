@@ -1,4 +1,4 @@
-import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -13,6 +13,8 @@ import {
 import "../global.css";
 
 import { Paleta, Tipografia } from '@/constants/theme';
+import { escucharToquesDeNotificaciones } from '../lib/notificaciones';
+import { abrirDesdeNotificacion } from '../lib/navegacion';
 
 export const unstable_settings = {
   anchor: 'index',
@@ -46,18 +48,38 @@ export default function RootLayout() {
     if (fuentesListas) SplashScreen.hideAsync();
   }, [fuentesListas]);
 
+  // Tocar un push (solicitud, aceptación, pago…) abre la pantalla del trabajo.
+  const router = useRouter();
+  useEffect(() => {
+    if (!fuentesListas) return;
+    return escucharToquesDeNotificaciones(datos => abrirDesdeNotificacion(router, datos));
+  }, [fuentesListas, router]);
+
   if (!fuentesListas) return null;
 
   return (
     <SafeAreaProvider>
       <ThemeProvider value={TemaNavegacion}>
-        <Stack screenOptions={{ contentStyle: { backgroundColor: Paleta.fondo } }}>
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* Animaciones de transición (Sprint 6): las pantallas apiladas entran deslizando desde
+            la derecha; las de "acción puntual" (calificar, reportar) suben desde abajo. */}
+        <Stack
+          screenOptions={{
+            contentStyle: { backgroundColor: Paleta.fondo },
+            animation: 'slide_from_right',
+            animationDuration: 250,
+            gestureEnabled: true,
+          }}>
+          <Stack.Screen name="index" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="pagos" options={{ headerShown: false }} />
+          <Stack.Screen name="notificaciones" options={{ headerShown: false }} />
+          <Stack.Screen name="reportar-problema" options={{ headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="register" options={{ headerShown: false }} />
           <Stack.Screen name="seguimiento" options={{ headerShown: false }} />
           <Stack.Screen name="checkout" options={{ headerShown: false }} />
+          <Stack.Screen name="perfil" options={{ headerShown: false }} />
+          <Stack.Screen name="calificar" options={{ headerShown: false, animation: 'slide_from_bottom', gestureEnabled: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
           <Stack.Screen
             name="modal"

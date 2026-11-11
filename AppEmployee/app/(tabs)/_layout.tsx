@@ -70,7 +70,7 @@ export default function TabLayout() {
   return (
     <Tabs
       tabBar={(props) => <CenterTabBar {...props} />}
-      screenOptions={{ headerShown: false }}>
+      screenOptions={{ headerShown: false, animation: 'shift' }}>
       <Tabs.Screen name="buscar" />
       <Tabs.Screen name="historial" />
       <Tabs.Screen name="explore" />

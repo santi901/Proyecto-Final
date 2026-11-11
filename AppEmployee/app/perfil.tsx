@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Pressable,
@@ -11,8 +11,8 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SelectorCategorias from '../components/selector-categorias';
-import TarjetaReputacion from '../components/tarjeta-reputacion';
-import type { Reputacion } from '../lib/reputacion';
+import TarjetaReputacion, { EstrellasLectura } from '../components/tarjeta-reputacion';
+import { formatearPuntaje, type Reputacion } from '../lib/reputacion';
 import { obtenerPerfil, actualizarPerfil, type PerfilEmpleado } from '../lib/perfil';
 import { Paleta } from '@/constants/theme';
 
@@ -67,6 +67,16 @@ export default function PerfilScreen() {
     return () => { activo = false; };
   }, []);
 
+  // Al volver de /metodos-cobro el método activo pudo cambiar: se relee sólo ese dato
+  // (sin pisar lo que el usuario esté editando en el formulario).
+  useFocusEffect(useCallback(() => {
+    let activo = true;
+    obtenerPerfil()
+      .then(({ perfil: p }) => activo && setPerfil(prev => (prev ? { ...prev, alias_cobro: p.alias_cobro } : prev)))
+      .catch(() => {});
+    return () => { activo = false; };
+  }, []));
+
   function actualizar(campo: keyof typeof form, valor: string) {
     setForm(prev => ({ ...prev, [campo]: valor }));
     setGuardado(false);
@@ -84,13 +94,9 @@ export default function PerfilScreen() {
       setError('Elegí al menos una categoría de trabajo.');
       return;
     }
-    // Mismo formato que valida el backend: CBU/CVU de 22 dígitos o alias de 6 a 20 caracteres.
-    const alias = form.alias_cobro.trim();
-    if (alias && !/^(\d{22}|[a-zA-Z0-9.-]{6,20})$/.test(alias)) {
-      setError('El CBU/CVU tiene que tener 22 dígitos, o el alias entre 6 y 20 caracteres.');
-      return;
-    }
     if (!perfil) return;
+    // El método de cobro se maneja en /metodos-cobro: acá se reenvía el que ya está.
+    const alias = perfil.alias_cobro?.trim() ?? '';
 
     setGuardando(true);
     try {
@@ -168,6 +174,40 @@ export default function PerfilScreen() {
         <Text className="text-2xl font-nunito-bold text-principal">Mi cuenta</Text>
       </View>
 
+      {/* Cabecera del perfil con el promedio de estrellas (Sprint 5) */}
+      <View className="items-center mb-5">
+        <View className="w-20 h-20 rounded-full bg-acento items-center justify-center mb-2">
+          <Text className="text-3xl font-nunito-bold text-principal">{(perfil.nombre?.[0] ?? 'U').toUpperCase()}</Text>
+        </View>
+        <Text className="text-principal text-lg font-nunito-bold">{perfil.nombre} {perfil.apellido}</Text>
+        <View className="flex-row items-center mt-1">
+          <EstrellasLectura valor={reputacion?.promedio ?? 0} tamano={16} />
+          <Text className="text-principal text-sm font-nunito-semi ml-1.5">
+            {reputacion?.promedio != null ? formatearPuntaje(reputacion.promedio) : 'Sin calificaciones'}
+          </Text>
+        </View>
+        <View className="bg-principal rounded-full px-3 py-1 mt-2">
+          <Text className="text-acento text-xs font-nunito-bold">Trabajador</Text>
+        </View>
+      </View>
+
+      <View className="bg-white rounded-xl border border-neutro mb-6 overflow-hidden">
+        {([
+          ['receipt-long', 'Historial de pagos', '/pagos'],
+          ['account-balance', 'Métodos de cobro', '/metodos-cobro'],
+          ['notifications-none', 'Notificaciones', '/notificaciones'],
+        ] as const).map(([icono, texto, ruta], i) => (
+          <Pressable
+            key={ruta}
+            onPress={() => router.push(ruta as any)}
+            className={`flex-row items-center px-4 py-3.5 active:opacity-70 ${i > 0 ? 'border-t border-neutro/30' : ''}`}>
+            <MaterialIcons name={icono} size={22} color={Paleta.principal} />
+            <Text className="flex-1 text-principal text-[15px] font-nunito-semi ml-3">{texto}</Text>
+            <MaterialIcons name="chevron-right" size={22} color={Paleta.neutro} />
+          </Pressable>
+        ))}
+      </View>
+
       {reputacion ? (
         <>
           <Text className="text-base font-nunito-bold text-principal mb-3">Mi reputación</Text>
@@ -233,17 +273,17 @@ export default function PerfilScreen() {
       <Text className="text-base font-nunito-bold text-principal mt-2 mb-1">Cómo cobrás</Text>
       <Text className="text-sm text-neutro mb-3 font-nunito leading-5">
         Cuando terminás un trabajo te transferimos lo que cobraste (ya descontada la comisión)
-        a este CBU, CVU o alias.
+        a tu método de cobro activo.
       </Text>
-      <TextInput
-        className={inputClass}
-        placeholder="CBU, CVU o alias"
-        placeholderTextColor={Paleta.neutro}
-        value={form.alias_cobro}
-        onChangeText={v => actualizar('alias_cobro', v.trim())}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
+      <Pressable
+        onPress={() => router.push('/metodos-cobro' as any)}
+        className="flex-row items-center bg-white rounded-[10px] px-4 py-3.5 mb-4 border border-neutro active:opacity-70">
+        <MaterialIcons name="account-balance" size={20} color={Paleta.principal} />
+        <Text className={`flex-1 ml-3 text-base ${perfil.alias_cobro ? 'font-nunito-semi text-principal' : 'font-nunito text-neutro'}`} numberOfLines={1}>
+          {perfil.alias_cobro || 'Agregá un CVU, CBU o alias'}
+        </Text>
+        <MaterialIcons name="chevron-right" size={22} color={Paleta.neutro} />
+      </Pressable>
 
       {error ? (
         <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text>

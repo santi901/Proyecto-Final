@@ -19,10 +19,28 @@ export const Paleta = {
   /** Variante más clara del fondo, para tarjetas apoyadas sobre el crema. */
   fondoSuave: '#FFFEE9',
   blanco: '#FFFFFF',
+  /** "Extras" de la lámina: bordes/sombras/destacados, siempre al 50% de opacidad salvo excepción puntual. */
+  rojo: '#FF0000',
+  verde: '#2AB511',
   /** Estados. No están en la lámina del design system: se eligieron para acompañarla. */
   error: '#E5484D',
   exito: '#2E9E5B',
 } as const;
+
+/**
+ * Sombra suave centrada que reemplaza los bordes de la lámina (misma función que en
+ * AppEmployer). `elevation` queda fija y chica para que Android siempre tenga sombra.
+ * Ojo: la sombra se recorta si el mismo View tiene `overflow: hidden`.
+ */
+export function sombra(color: string, opacidad = 0.65, radio = 1.5) {
+  return {
+    shadowColor: color,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: opacidad,
+    shadowRadius: radio,
+    elevation: 2,
+  } as const;
+}
 
 /**
  * Nunito Sans en los tres pesos de la lámina. Se cargan en `app/_layout.tsx`.

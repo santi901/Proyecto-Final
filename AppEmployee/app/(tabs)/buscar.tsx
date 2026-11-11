@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Animated,
@@ -26,6 +26,9 @@ import ModalSolicitud from '../../components/modal-solicitud';
 import BotonChat from '../../components/boton-chat';
 import PanelDeslizable from '../../components/panel-deslizable';
 import { activarNotificacionesPush } from '../../lib/notificaciones';
+import BotonNotificaciones from '../../components/boton-notificaciones';
+import { activarMetodo, cargarMetodos, formatearValor, type MetodoCobro } from '../../lib/metodosCobro';
+import { reintentarReportesPendientes } from '../../lib/disputas';
 import { Paleta } from '@/constants/theme';
 
 type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
@@ -166,6 +169,42 @@ export default function BuscarTrabajoScreen() {
     setSolicitud(null);
   }
 
+  // ----- Método de cobro activo (Sprint 5): selector en el panel de búsqueda -----
+  const [metodos, setMetodos] = useState<MetodoCobro[]>([]);
+  const [metodoActivo, setMetodoActivo] = useState<string | null>(null);
+  const [selectorCobro, setSelectorCobro] = useState(false);
+  const [cambiandoMetodo, setCambiandoMetodo] = useState(false);
+  const [errorCobro, setErrorCobro] = useState('');
+
+  // Se recarga al volver a la pestaña (por ej. después de agregar uno en /metodos-cobro).
+  useFocusEffect(useCallback(() => {
+    let activo = true;
+    getUsuario().then(u => {
+      if (!u) return;
+      cargarMetodos(u.id)
+        .then(r => { if (activo) { setMetodos(r.metodos); setMetodoActivo(r.activo); } })
+        .catch(e => console.log('No se pudieron cargar los métodos de cobro:', e?.message));
+    });
+    reintentarReportesPendientes();
+    return () => { activo = false; };
+  }, []));
+
+  async function elegirMetodo(m: MetodoCobro) {
+    setErrorCobro('');
+    if (m.valor === metodoActivo) { setSelectorCobro(false); return; }
+    setCambiandoMetodo(true);
+    try {
+      setMetodoActivo(await activarMetodo(usuarioId, m.id));
+      setSelectorCobro(false);
+    } catch (e: any) {
+      setErrorCobro(e?.message ?? 'No pudimos cambiar el método de cobro.');
+    } finally {
+      setCambiandoMetodo(false);
+    }
+  }
+
+  const metodoElegido = metodos.find(m => m.valor === metodoActivo);
+
   // ----- Panel de perfil (se desliza desde el costado) -----
   const panelX = useRef(new Animated.Value(PANEL_WIDTH)).current;
 
@@ -273,6 +312,7 @@ export default function BuscarTrabajoScreen() {
           <MaterialIcons name="place" size={24} color={Paleta.principal} />
         </View>
         <View className="flex-row gap-3">
+          <BotonNotificaciones />
           <BotonChat />
           <Pressable
             onPress={abrirPerfil}
@@ -381,17 +421,69 @@ export default function BuscarTrabajoScreen() {
           </View>
         )}
 
-        {/* Ayuda + Método de cobro */}
-        <View className="flex-row gap-3 mb-6">
-          <Pressable className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
-            <Text className="text-[15px] font-nunito-semi text-principal">Ayuda</Text>
+        {/* Avisos + Método de cobro (selector del método activo) */}
+        <View className="flex-row gap-3 mb-2">
+          <Pressable
+            onPress={() => router.push('/notificaciones' as any)}
+            className="rounded-[10px] py-3 px-5 items-center justify-center border border-principal bg-white active:opacity-70">
+            <Text className="text-[15px] font-nunito-semi text-principal">Avisos</Text>
           </Pressable>
 
-          <Pressable className="flex-1 flex-row items-center justify-between bg-white rounded-[10px] px-4 py-3 border border-neutro active:opacity-70">
-            <Text className="text-base font-nunito text-neutro">Método de cobro</Text>
-            <MaterialIcons name="keyboard-arrow-down" size={22} color={Paleta.principal} />
+          <Pressable
+            onPress={() => {
+              setErrorCobro('');
+              if (metodos.length === 0) router.push('/metodos-cobro' as any);
+              else setSelectorCobro(s => !s);
+            }}
+            className={`flex-1 flex-row items-center justify-between bg-white rounded-[10px] px-4 py-3 border active:opacity-70 ${
+              metodoElegido ? 'border-principal' : 'border-neutro'
+            }`}>
+            <View className="flex-1 pr-2">
+              <Text className={`text-base ${metodoElegido ? 'font-nunito-semi text-principal' : 'font-nunito text-neutro'}`} numberOfLines={1}>
+                {metodoElegido ? metodoElegido.etiqueta : 'Método de cobro'}
+              </Text>
+              {metodoElegido ? (
+                <Text className="text-[11px] font-nunito text-neutro" numberOfLines={1}>
+                  {metodoElegido.tipo} · {formatearValor(metodoElegido)}
+                </Text>
+              ) : null}
+            </View>
+            {cambiandoMetodo ? (
+              <ActivityIndicator size="small" color={Paleta.principal} />
+            ) : (
+              <MaterialIcons name={selectorCobro ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={22} color={Paleta.principal} />
+            )}
           </Pressable>
         </View>
+
+        {selectorCobro ? (
+          <View className="bg-white rounded-[10px] border border-neutro mb-2 overflow-hidden">
+            {metodos.map((m, i) => {
+              const activo = m.valor === metodoActivo;
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => elegirMetodo(m)}
+                  disabled={cambiandoMetodo}
+                  className={`flex-row items-center px-4 py-3 active:opacity-70 ${i > 0 ? 'border-t border-neutro/30' : ''} ${activo ? 'bg-acento' : ''}`}>
+                  <MaterialIcons name={activo ? 'radio-button-checked' : 'radio-button-unchecked'} size={18} color={Paleta.principal} />
+                  <View className="flex-1 ml-3">
+                    <Text className="text-sm font-nunito-semi text-principal">{m.etiqueta}</Text>
+                    <Text className="text-[11px] font-nunito text-neutro">{m.tipo} · {formatearValor(m)}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => { setSelectorCobro(false); router.push('/metodos-cobro' as any); }}
+              className="flex-row items-center px-4 py-3 border-t border-neutro/30 active:opacity-70">
+              <MaterialIcons name="add" size={18} color={Paleta.principal} />
+              <Text className="text-sm font-nunito-semi text-principal ml-3">Agregar o editar métodos</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {errorCobro ? <Text className="text-error text-[13px] font-nunito text-center mb-2">{errorCobro}</Text> : null}
+        <View className="mb-6" />
       </PanelDeslizable>
 
       {/* Solicitud entrante con timer */}
@@ -452,14 +544,19 @@ export default function BuscarTrabajoScreen() {
                 <MaterialIcons name="person-outline" size={22} color={Paleta.blanco} />
                 <Text className="text-white text-[15px] font-nunito ml-3">Mi cuenta</Text>
               </Pressable>
-              <Pressable className="flex-row items-center py-3.5 active:opacity-70">
-                <MaterialIcons name="settings" size={22} color={Paleta.blanco} />
-                <Text className="text-white text-[15px] font-nunito ml-3">Configuración</Text>
-              </Pressable>
-              <Pressable className="flex-row items-center py-3.5 active:opacity-70">
-                <MaterialIcons name="help-outline" size={22} color={Paleta.blanco} />
-                <Text className="text-white text-[15px] font-nunito ml-3">Ayuda</Text>
-              </Pressable>
+              {([
+                ['account-balance', 'Métodos de cobro', '/metodos-cobro'],
+                ['receipt-long', 'Mis pagos', '/pagos'],
+                ['notifications-none', 'Notificaciones', '/notificaciones'],
+              ] as const).map(([icono, texto, ruta]) => (
+                <Pressable
+                  key={ruta}
+                  onPress={() => { cerrarPerfil(); router.push(ruta as any); }}
+                  className="flex-row items-center py-3.5 active:opacity-70">
+                  <MaterialIcons name={icono} size={22} color={Paleta.blanco} />
+                  <Text className="text-white text-[15px] font-nunito ml-3">{texto}</Text>
+                </Pressable>
+              ))}
             </View>
 
             <View className="flex-1" />

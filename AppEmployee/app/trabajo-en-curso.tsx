@@ -209,6 +209,10 @@ export default function TrabajoEnCursoScreen() {
     router.push({ pathname: '/chat', params: { trabajoId } } as any);
   }
 
+  function abrirReporte() {
+    router.push({ pathname: '/reportar-problema', params: { trabajoId, titulo: trabajo?.titulo ?? '' } } as any);
+  }
+
   // ----- Estados de carga / error -----
   if (cargando) {
     return (
@@ -263,6 +267,12 @@ export default function TrabajoEnCursoScreen() {
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mt-8">
           <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
         </Pressable>
+        <Pressable
+          onPress={() => router.push('/pagos' as any)}
+          className="py-3 mt-2 items-center active:opacity-70">
+          <Text className="text-principal text-sm font-nunito-semi underline">Ver mis pagos</Text>
+        </Pressable>
+        <BotonReportar onPress={abrirReporte} />
       </View>
     );
   }
@@ -288,6 +298,7 @@ export default function TrabajoEnCursoScreen() {
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mt-8">
           <Text className="text-white text-base font-nunito-bold">Volver al inicio</Text>
         </Pressable>
+        {!loCanceleYo ? <BotonReportar onPress={abrirReporte} /> : null}
       </View>
     );
   }
@@ -500,6 +511,18 @@ export default function TrabajoEnCursoScreen() {
           )}
         </>
       )}
+
+      <BotonReportar onPress={abrirReporte} />
     </ScrollView>
+  );
+}
+
+// Sistema de disputas (Sprint 6): abre el formulario de "Reportar problema".
+function BotonReportar({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} className="flex-row items-center justify-center py-3 mt-4 active:opacity-70">
+      <MaterialIcons name="report-problem" size={18} color={Paleta.error} />
+      <Text className="text-error text-sm font-nunito-semi ml-1.5">Reportar problema</Text>
+    </Pressable>
   );
 }
