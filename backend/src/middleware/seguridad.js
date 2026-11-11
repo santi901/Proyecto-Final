@@ -64,6 +64,28 @@ const limites = {
   pin:      limitador({ minutos: 15, maximo: 10, mensaje: 'Demasiados intentos de PIN, esperá 15 minutos' }),
   cotizar:  limitador({ minutos: 1, maximo: 30, mensaje: 'Demasiadas cotizaciones, esperá un minuto' }),
   crearTrabajo: limitador({ minutos: 10, maximo: 10, mensaje: 'Demasiados trabajos creados, esperá unos minutos' }),
+  // Rutas de admin: solo cuentan las rechazadas por clave inválida (403), para que no
+  // se pueda probar claves; un 409 o 400 de uso normal del panel no suma.
+  admin: limitador({
+    minutos: 15, maximo: 20, skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 403,
+    mensaje: 'Demasiados intentos, esperá 15 minutos',
+  }),
 }
 
-module.exports = { configurarProxy, forzarHttps, headersSeguridad, limites }
+// El panel de admin (backend/public/admin) es HTML + JS propio servido desde acá mismo.
+// helmet ya pone una CSP; esta es la misma idea pero sin `upgrade-insecure-requests`,
+// que en http://localhost haría que el navegador pida el JS por https y no cargue.
+const CSP_PANEL_ADMIN = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join('; ')
+
+module.exports = { configurarProxy, forzarHttps, headersSeguridad, limites, CSP_PANEL_ADMIN }

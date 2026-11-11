@@ -21,6 +21,11 @@ const aliasCobro = z.string().trim().regex(
   'Tiene que ser un CBU/CVU de 22 dígitos o un alias de 6 a 20 caracteres',
 )
 
+const pagina = {
+  pagina:    z.coerce.number().int().min(1).max(10000).optional(),
+  porPagina: z.coerce.number().int().min(1).max(100).optional(),
+}
+
 const datosPersonales = {
   nombre:          texto(80),
   apellido:        texto(80),
@@ -101,4 +106,21 @@ module.exports = {
   // pagos (admin)
   liquidacionesQuery: z.looseObject({ estado: z.enum(['pendiente', 'pagada']).optional() }),
   marcarLiquidacion:  z.object({ referencia: texto(100) }),
+
+  // admin
+  usuariosQuery: z.looseObject({
+    ...pagina,
+    tipo:       z.enum(['empleado', 'empleador']).optional(),
+    q:          z.string().trim().max(100).optional(),
+  }),
+  trabajosAdminQuery: z.looseObject({
+    ...pagina,
+    estado:    z.enum(['pago_pendiente', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado']).optional(),
+    categoria: categoria.optional(),
+  }),
+  transaccionesQuery: z.looseObject({
+    ...pagina,
+    tipo:   z.enum(['pagos', 'liquidaciones']).optional(),
+    estado: z.string().trim().max(30).optional(),
+  }),
 }

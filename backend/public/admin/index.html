@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ChanguitApp Admin</title>
+<style>
+  :root {
+    --fondo: #f6f7f9; --superficie: #ffffff; --borde: #dfe3e8; --texto: #1d2733; --suave: #5f6b7a;
+    --principal: #1f4e79; --principal-texto: #ffffff; --ok: #1e7b4a; --alerta: #a8590b; --error: #b3261e;
+    --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #12161b; --superficie: #1a2027; --borde: #2c343e; --texto: #e6e9ed; --suave: #9aa5b1;
+      --principal: #6ea8dc; --principal-texto: #0f1720; --ok: #5cc48c; --alerta: #e0a050; --error: #f08a80;
+      --chip: #232b34;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--superficie); border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { background: none; border: 0; padding: 6px 10px; border-radius: 6px; color: var(--suave); cursor: pointer; font: inherit; }
+  nav button[aria-selected="true"] { background: var(--chip); color: var(--texto); font-weight: 600; }
+  header .salir { margin-left: auto; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px; padding: 16px; }
+  .login { max-width: 380px; margin: 64px auto; }
+  .login h1 { font-size: 18px; margin: 0 0 4px; }
+  .login p { color: var(--suave); margin: 0 0 16px; }
+  input, select { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; padding: 6px 8px; }
+  .login input { width: 100%; margin-bottom: 12px; }
+  button.primario, button.accion { font: inherit; cursor: pointer; border-radius: 6px; padding: 6px 12px; }
+  button.primario { background: var(--principal); color: var(--principal-texto); border: 0; }
+  button.accion { background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); padding: 3px 8px; font-size: 13px; }
+  button.accion.peligro { color: var(--error); }
+  button:disabled { opacity: .5; cursor: default; }
+  .filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .tabla { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--borde); vertical-align: top; white-space: nowrap; }
+  th { color: var(--suave); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.largo { white-space: normal; min-width: 160px; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; }
+  .chip.ok { color: var(--ok); } .chip.alerta { color: var(--alerta); } .chip.error { color: var(--error); }
+  .suave { color: var(--suave); }
+  .paginas { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi .valor { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .etiqueta { color: var(--suave); font-size: 13px; }
+  .mensaje { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; background: var(--chip); }
+  .mensaje.error { color: var(--error); }
+  .acciones { display: flex; gap: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <section id="pantalla-login" class="tarjeta login">
+    <h1>ChanguitApp · Admin</h1>
+    <p>Ingresá la clave de administración (ADMIN_API_KEY del backend).</p>
+    <form id="form-login">
+      <input id="clave" type="password" autocomplete="current-password" placeholder="Clave de admin" required>
+      <p id="error-login" class="mensaje error" hidden></p>
+      <button class="primario" type="submit">Entrar</button>
+    </form>
+  </section>
+
+  <div id="pantalla-panel" hidden>
+    <header>
+      <h1>ChanguitApp · Admin</h1>
+      <nav id="pestanas" role="tablist">
+        <button role="tab" data-vista="resumen">Resumen</button>
+        <button role="tab" data-vista="usuarios">Usuarios</button>
+        <button role="tab" data-vista="trabajos">Trabajos</button>
+        <button role="tab" data-vista="pagos">Pagos</button>
+        <button role="tab" data-vista="liquidaciones">Liquidaciones</button>
+      </nav>
+      <button id="salir" class="accion salir" type="button">Salir</button>
+    </header>
+    <main>
+      <p id="aviso" class="mensaje" hidden></p>
+      <div id="vista"></div>
+    </main>
+  </div>
+
+  <script src="/admin/panel.js"></script>
+</body>
+</html>

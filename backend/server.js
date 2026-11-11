@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors    = require('cors')
 const http    = require('http')
+const path    = require('path')
 
 const authRoutes         = require('./src/routes/auth')
 const empleadosRoutes    = require('./src/routes/empleados')
@@ -11,8 +12,9 @@ const verificacionRoutes = require('./src/routes/verificacion')
 const ubicacionRoutes    = require('./src/routes/ubicacion')
 const pagosRoutes        = require('./src/routes/pagos')
 const notificacionesRoutes = require('./src/routes/notificaciones')
+const adminRoutes        = require('./src/routes/admin')
 const errorHandler       = require('./src/middleware/errorHandler')
-const { configurarProxy, forzarHttps, headersSeguridad, limites } = require('./src/middleware/seguridad')
+const { configurarProxy, forzarHttps, headersSeguridad, limites, CSP_PANEL_ADMIN } = require('./src/middleware/seguridad')
 const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
 const { configurarSocket } = require('./src/realtime/socket')
 const { pagosSimulados } = require('./src/services/mercadoPagoService')
@@ -43,6 +45,13 @@ app.use('/api/verificacion', verificacionRoutes)
 app.use('/api/ubicacion',    ubicacionRoutes)
 app.use('/api/pagos',        pagosRoutes)
 app.use('/api/notificaciones', notificacionesRoutes)
+app.use('/api/admin',        adminRoutes)
+
+// Panel de administración: páginas estáticas que le pegan a /api/admin/* con la clave
+// que se tipea en el panel. Servirlas sin clave no expone nada: los datos van por la API.
+app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
+  setHeaders: (res) => res.setHeader('Content-Security-Policy', CSP_PANEL_ADMIN),
+}))
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
