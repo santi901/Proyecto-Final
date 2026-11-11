@@ -375,10 +375,23 @@ async function validarPinTrabajo(req, res) {
   const pinValido = await validarPin(pin, trabajo.pin_hash)
   if (!pinValido) return res.status(401).json({ error: 'PIN incorrecto' })
 
-  await supabase
+  // Condicional: si el empleador lo canceló (y se le reembolsó) mientras se tipeaba
+  // el PIN, no se puede revivir el trabajo pasándolo a en_progreso.
+  const { data: iniciados, error } = await supabase
     .from('trabajos')
     .update({ estado: 'en_progreso', iniciado_en: new Date().toISOString() })
     .eq('id', trabajoId)
+    .eq('estado', 'asignado')
+    .select('id')
+
+  if (error) {
+    console.error(`Error iniciando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error iniciando el trabajo' })
+  }
+  if (!iniciados?.length) {
+    console.error(`Validar PIN rechazado (trabajoId=${trabajoId}): el trabajo cambió de estado mientras se validaba.`)
+    return res.status(409).json({ error: 'El trabajo cambió de estado (¿se canceló?). Actualizá y probá de nuevo.' })
+  }
 
   res.json({ success: true, message: 'PIN validado. Trabajo iniciado.' })
 
