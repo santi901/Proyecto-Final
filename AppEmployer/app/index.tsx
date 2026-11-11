@@ -38,7 +38,7 @@ export default function WelcomeScreen() {
     }
   }
 
-  const Marca = () => (
+  const marca = (
     <View className="flex-row items-center gap-2.5 mb-9">
       <View className="w-11 h-11 rounded-xl bg-acento items-center justify-center">
         <Text className="text-2xl font-nunito-bold text-principal">C</Text>
@@ -69,7 +69,7 @@ export default function WelcomeScreen() {
         showsVerticalScrollIndicator={false}>
         <View className="grow justify-between">
           <View className="mb-6">
-            <Marca />
+            {marca}
 
             <Text className="text-3xl font-nunito-bold text-principal leading-10 mb-7">
               Bienvenido/a a{'\n'}ChanguitApp Employer
@@ -120,7 +120,7 @@ export default function WelcomeScreen() {
         paddingBottom: insets.bottom + 24,
         justifyContent: 'center',
       }}>
-      <Marca />
+      {marca}
 
       <Text className="text-3xl font-nunito-bold text-principal mb-7">
         Iniciá sesión en{'\n'}ChanguitApp Employer
