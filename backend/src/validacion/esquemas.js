@@ -1,5 +1,6 @@
 const { z } = require('zod')
 const { CATEGORIAS, DIFICULTADES } = require('../services/preciosService')
+const { analizarDatoCobro } = require('../utils/cobro')
 
 // Mensajes de error de zod en español.
 z.config(z.locales.es())
@@ -15,11 +16,12 @@ const longitud   = z.number().min(-180).max(180)
 const categoria  = z.enum(CATEGORIAS)
 const uuid       = z.uuid()
 
-// CBU/CVU: 22 dígitos. Alias de MP/bancos: 6 a 20 caracteres, letras, números, punto y guion.
-const aliasCobro = z.string().trim().regex(
-  /^(\d{22}|[a-zA-Z0-9.-]{6,20})$/,
-  'Tiene que ser un CBU/CVU de 22 dígitos o un alias de 6 a 20 caracteres',
-)
+// CBU/CVU de 22 dígitos (con sus dígitos verificadores) o alias de 6 a 20 caracteres:
+// ver utils/cobro.js.
+const aliasCobro = z.string().trim().superRefine((valor, ctx) => {
+  const { error } = analizarDatoCobro(valor)
+  if (error) ctx.addIssue({ code: 'custom', message: error })
+})
 
 const pagina = {
   pagina:    z.coerce.number().int().min(1).max(10000).optional(),
@@ -69,6 +71,10 @@ module.exports = {
   // perfiles
   perfilEmpleado:  z.looseObject({ ...datosEmpleado, aliasCobro: opcional(aliasCobro) }),
   perfilEmpleador: z.looseObject(datosEmpleador),
+  metodoCobro:     z.object({
+    valor:   aliasCobro,
+    titular: opcional(z.string().trim().max(120)),
+  }),
 
   // trabajos
   cotizar: z.object({

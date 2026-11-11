@@ -14,6 +14,7 @@ import SelectorCategorias from '../components/selector-categorias';
 import TarjetaReputacion from '../components/tarjeta-reputacion';
 import type { Reputacion } from '../lib/reputacion';
 import { obtenerPerfil, actualizarPerfil, type PerfilEmpleado } from '../lib/perfil';
+import { analizarDatoCobro, NOMBRE_TIPO_COBRO } from '../lib/cobro';
 import { Paleta } from '@/constants/theme';
 
 // Edición del perfil del trabajador, incluidas las categorías en las que trabaja
@@ -84,10 +85,11 @@ export default function PerfilScreen() {
       setError('Elegí al menos una categoría de trabajo.');
       return;
     }
-    // Mismo formato que valida el backend: CBU/CVU de 22 dígitos o alias de 6 a 20 caracteres.
+    // Misma validación que el backend: CBU/CVU con sus dígitos verificadores, o alias.
     const alias = form.alias_cobro.trim();
-    if (alias && !/^(\d{22}|[a-zA-Z0-9.-]{6,20})$/.test(alias)) {
-      setError('El CBU/CVU tiene que tener 22 dígitos, o el alias entre 6 y 20 caracteres.');
+    const datoCobro = alias ? analizarDatoCobro(alias) : null;
+    if (datoCobro?.error) {
+      setError(datoCobro.error);
       return;
     }
     if (!perfil) return;
@@ -150,6 +152,9 @@ export default function PerfilScreen() {
 
   const inputClass =
     'bg-white rounded-[10px] px-4 py-3.5 mb-4 text-base font-nunito text-principal border border-neutro';
+
+  // Debajo del campo: qué se detectó (CBU / CVU / alias) o qué tiene de malo.
+  const datoCobro = form.alias_cobro ? analizarDatoCobro(form.alias_cobro) : null;
 
   return (
     <ScrollView
@@ -236,7 +241,7 @@ export default function PerfilScreen() {
         a este CBU, CVU o alias.
       </Text>
       <TextInput
-        className={inputClass}
+        className={datoCobro ? inputClass.replace('mb-4', 'mb-1') : inputClass}
         placeholder="CBU, CVU o alias"
         placeholderTextColor={Paleta.neutro}
         value={form.alias_cobro}
@@ -244,6 +249,11 @@ export default function PerfilScreen() {
         autoCapitalize="none"
         autoCorrect={false}
       />
+      {datoCobro ? (
+        <Text className={`text-[13px] font-nunito mb-4 ${datoCobro.error ? 'text-error' : 'text-neutro'}`}>
+          {datoCobro.error ?? `${NOMBRE_TIPO_COBRO[datoCobro.tipo]} válido`}
+        </Text>
+      ) : null}
 
       {error ? (
         <Text className="text-error text-center mb-2 text-[13px] font-nunito">{error}</Text>

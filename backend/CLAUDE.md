@@ -47,6 +47,7 @@ src/controllers/adminController.js    /api/admin/*: summary, users (suspend/veri
 public/admin/                         admin panel UI (plain HTML + JS, no build), served at GET /admin
 src/services/cuentasService.js        account state (suspension), tolerant of the suspension columns being missing
 src/services/webhooksService.js       logs each MP webhook to `webhooks_mp` and processes/reprocesses it
+src/utils/cobro.js                    CBU/CVU check-digit validation + alias format (mirrored in AppEmployee/lib/cobro.ts)
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
 src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
@@ -107,6 +108,8 @@ Money flow: the employer pays the platform's MP account up front → the money i
 Commission is tiered on the final price (15% up to $5.000, 12% up to $10.000, 10% above) and stored per trabajo (`comision_porcentaje`, `comision_monto`, `monto_trabajador`), so later tariff changes don't alter existing jobs. All amounts are whole pesos. MP's own processing fee comes out of the platform's commission.
 
 **Webhook log**: every `payment` notification is recorded in `webhooks_mp` (`webhooksService.js`) *after* the response is sent, so logging never delays or breaks the webhook: `recibido` → `procesado`/`error`, or `rechazado` for a bad signature. `POST /api/admin/webhooks/:id/reprocesar` re-fetches the payment from MP and runs `procesarPagoMp` again (safe, it's idempotent). If MP reports a payment we hold (`aprobado`/`liberado`) as `refunded`/`charged_back` (chargeback or a refund made from MP's own dashboard), `procesarPagoMp` only logs it and sets `pagos.ultimo_error` — it deliberately doesn't change state, since a liquidación may already exist.
+
+**Payout method** — `GET/PUT /api/empleados/metodo-cobro { valor, titular? }`. `valor` is validated by `utils/cobro.js` (CBU/CVU: 22 digits with both check digits; `000…` = CVU; alias: 6-20 chars, all-digit aliases rejected as a half-copied CBU). The value stays in `empleados.alias_cobro`, which is what liquidaciones snapshot; the type is always derived from the value (not stored), since `PUT /perfil { aliasCobro }` can still change it. Saving a new alias (either endpoint) also rewrites `alias_cobro` on the worker's **pending** liquidaciones, so the admin transfers to the current account; paid ones are left alone.
 
 ### Administración
 
