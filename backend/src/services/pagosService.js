@@ -59,6 +59,17 @@ async function procesarPagoMp(pagoMp) {
     actualizado_en: new Date().toISOString(),
   }).eq('id', pago.id)
 
+  // Un pago que acá figura cobrado y MP informa devuelto: contracargo del comprador o
+  // devolución hecha a mano desde el panel de MP. No se cambia el estado (puede haber
+  // una liquidación de por medio): se deja marcado para que lo revise un admin.
+  if (['refunded', 'charged_back'].includes(pagoMp.status) && ['aprobado', 'liberado'].includes(pago.estado)) {
+    console.error(`MP informa el pago como '${pagoMp.status}' pero acá figura '${pago.estado}' (trabajoId=${trabajoId}): revisar a mano.`)
+    await supabase.from('pagos')
+      .update({ ultimo_error: `MercadoPago informó el pago como '${pagoMp.status}'` })
+      .eq('id', pago.id)
+      .in('estado', ['aprobado', 'liberado'])
+  }
+
   if (pagoMp.status !== 'approved') return
 
   // Nunca confiar en que MP cobró lo que esperábamos sin chequearlo.

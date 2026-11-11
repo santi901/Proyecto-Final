@@ -2,7 +2,7 @@ const express = require('express')
 const router  = express.Router()
 const {
   resumen, listarUsuarios, cambiarSuspension, cambiarVerificacion,
-  listarTrabajos, listarTransacciones,
+  listarTrabajos, listarTransacciones, listarWebhooks, reprocesarWebhook,
 } = require('../controllers/adminController')
 const { soloAdmin } = require('../middleware/admin')
 const { validar, validarIdParam } = require('../middleware/validar')
@@ -20,5 +20,7 @@ router.post('/usuarios/:id/suspension',    validar(esquemas.suspension), cambiar
 router.post('/usuarios/:id/verificacion',  validar(esquemas.verificacion), cambiarVerificacion)
 router.get('/trabajos',                    validar(esquemas.trabajosAdminQuery, 'query'), listarTrabajos)
 router.get('/transacciones',               validar(esquemas.transaccionesQuery, 'query'), listarTransacciones)
+router.get('/webhooks',                    validar(esquemas.webhooksQuery, 'query'), listarWebhooks)
+router.post('/webhooks/:id/reprocesar',    reprocesarWebhook)
 
 module.exports = router

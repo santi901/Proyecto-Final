@@ -10,6 +10,7 @@ const POR_PAGINA = 25;
 const ESTADOS_TRABAJO = ['pago_pendiente', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado'];
 const ESTADOS_PAGO = ['pendiente', 'aprobado', 'liberado', 'reembolsado', 'reembolsado_parcial', 'reembolso_fallido', 'cancelado', 'monto_invalido'];
 const ESTADOS_LIQUIDACION = ['pendiente', 'pagada'];
+const ESTADOS_WEBHOOK = ['recibido', 'procesado', 'error', 'rechazado'];
 
 const COLOR_ESTADO = {
   completado: 'ok', aprobado: 'ok', liberado: 'ok', pagada: 'ok', procesado: 'ok',
@@ -293,6 +294,26 @@ const VISTAS = {
       el('div', { className: 'filtros' }, selectorFiltro('estado', 'Estado', ESTADOS_LIQUIDACION)),
       el('div', { className: 'tarjeta' },
         tabla(['Trabajo / trabajador', 'Motivo', 'Estado', 'Monto', 'Alias / CBU', 'Creada', ''], filas),
+        paginador(r.total)));
+  },
+
+  async webhooks() {
+    const r = await api(`/api/admin/webhooks?${query()}`);
+    const filas = r.webhooks.map((w) => el('tr', {},
+      el('td', {}, fecha(w.recibido_en)),
+      el('td', {}, w.data_id),
+      el('td', {}, chip(w.estado), w.error ? el('div', { className: 'suave' }, w.error) : null),
+      el('td', {}, w.firma_valida == null ? chip('sin chequear', 'alerta') : w.firma_valida ? chip('válida', 'ok') : chip('inválida', 'error')),
+      el('td', {}, w.mp_estado ?? '—'),
+      el('td', {}, w.trabajo_id ? corto(w.trabajo_id) : '—'),
+      el('td', {}, w.estado === 'rechazado' ? '' : botonAccion('Reprocesar', async () => {
+        const res = await api(`/api/admin/webhooks/${w.id}/reprocesar`, { method: 'POST' });
+        return `Reprocesado: MP informa '${res.mpEstado}'.`;
+      }))));
+    return el('div', {},
+      el('div', { className: 'filtros' }, selectorFiltro('estado', 'Estado', ESTADOS_WEBHOOK)),
+      el('div', { className: 'tarjeta' },
+        tabla(['Recibido', 'Pago MP', 'Estado', 'Firma', 'Estado en MP', 'Trabajo', ''], filas),
         paginador(r.total)));
   },
 };

@@ -1,25 +1,30 @@
 const supabase = require('../config/supabase')
 const mp = require('../services/mercadoPagoService')
-const pagos = require('../services/pagosService')
+const webhooks = require('../services/webhooksService')
 
-// POST /api/pagos/webhook — notificaciones de MercadoPago. Se responde 200
-// enseguida (MP reintenta si tardamos o respondemos error) y se procesa después.
+// POST /api/pagos/webhook — notificaciones de MercadoPago. Se responde enseguida
+// (MP reintenta si tardamos o respondemos error) y se procesa después.
 // El pago se vuelve a pedir a la API de MP: nunca se confía en el body.
+// Cada notificación queda registrada en `webhooks_mp` (ver webhooksService.js).
 async function recibirWebhook(req, res) {
-  const tipo   = req.query.type ?? req.query.topic ?? req.body?.type
-  const dataId = req.query['data.id'] ?? req.body?.data?.id ?? req.query.id
+  const tipo      = req.query.type ?? req.query.topic ?? req.body?.type
+  const dataId    = req.query['data.id'] ?? req.body?.data?.id ?? req.query.id
+  const requestId = req.headers['x-request-id']
 
   if (tipo !== 'payment' || !dataId) return res.sendStatus(200)
 
+  let firmaValida = null  // null = no se pudo chequear (falta MP_WEBHOOK_SECRET)
   if (process.env.MP_WEBHOOK_SECRET) {
-    const valida = mp.firmaWebhookValida({
+    firmaValida = mp.firmaWebhookValida({
       firma:     req.headers['x-signature'],
-      requestId: req.headers['x-request-id'],
+      requestId,
       dataId:    String(dataId),
     })
-    if (!valida) {
+    if (!firmaValida) {
       console.error(`Webhook de MP rechazado (paymentId=${dataId}): firma inválida.`)
-      return res.sendStatus(401)
+      res.sendStatus(401)
+      await webhooks.registrarEvento({ tipo, dataId, requestId, firmaValida, estado: 'rechazado' })
+      return
     }
   } else {
     console.error('Webhook de MP sin validar firma: falta MP_WEBHOOK_SECRET (no usar así en producción).')
@@ -27,12 +32,8 @@ async function recibirWebhook(req, res) {
 
   res.sendStatus(200)
 
-  try {
-    const pagoMp = await mp.obtenerPago(dataId)
-    await pagos.procesarPagoMp(pagoMp)
-  } catch (error) {
-    console.error(`Error procesando webhook de MP (paymentId=${dataId}): ${error.message ?? error}`)
-  }
+  const eventoId = await webhooks.registrarEvento({ tipo, dataId, requestId, firmaValida, estado: 'recibido' })
+  await webhooks.procesarEvento(eventoId, dataId)
 }
 
 // GET /api/pagos/retorno — adonde MP redirige al terminar el checkout. Intenta

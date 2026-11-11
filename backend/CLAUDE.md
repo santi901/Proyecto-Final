@@ -43,9 +43,10 @@ src/validacion/esquemas.js            zod schemas for every request body/query (
 src/middleware/validar.js             validar(schema[, 'query']) + validarIdParam (router.param uuid check)
 src/middleware/seguridad.js           helmet, HTTPS enforcement / trust proxy, per-route rate limiters
 src/middleware/admin.js               soloAdmin: shared-secret header x-admin-key (there is no admin user type)
-src/controllers/adminController.js    /api/admin/*: summary, users (suspend/verify), jobs, transactions
+src/controllers/adminController.js    /api/admin/*: summary, users (suspend/verify), jobs, transactions, MP webhooks
 public/admin/                         admin panel UI (plain HTML + JS, no build), served at GET /admin
 src/services/cuentasService.js        account state (suspension), tolerant of the suspension columns being missing
+src/services/webhooksService.js       logs each MP webhook to `webhooks_mp` and processes/reprocesses it
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
 src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
@@ -105,9 +106,11 @@ Money flow: the employer pays the platform's MP account up front → the money i
 
 Commission is tiered on the final price (15% up to $5.000, 12% up to $10.000, 10% above) and stored per trabajo (`comision_porcentaje`, `comision_monto`, `monto_trabajador`), so later tariff changes don't alter existing jobs. All amounts are whole pesos. MP's own processing fee comes out of the platform's commission.
 
+**Webhook log**: every `payment` notification is recorded in `webhooks_mp` (`webhooksService.js`) *after* the response is sent, so logging never delays or breaks the webhook: `recibido` → `procesado`/`error`, or `rechazado` for a bad signature. `POST /api/admin/webhooks/:id/reprocesar` re-fetches the payment from MP and runs `procesarPagoMp` again (safe, it's idempotent). If MP reports a payment we hold (`aprobado`/`liberado`) as `refunded`/`charged_back` (chargeback or a refund made from MP's own dashboard), `procesarPagoMp` only logs it and sets `pagos.ultimo_error` — it deliberately doesn't change state, since a liquidación may already exist.
+
 ### Administración
 
-`/api/admin/*` (`routes/admin.js`): `soloAdmin` + `limites.admin` (counts only 403s, so the key can't be brute-forced). `GET /resumen`, `GET /usuarios?tipo=&q=&suspendido=`, `GET /trabajos?estado=&categoria=`, `GET /transacciones?tipo=pagos|liquidaciones&estado=`, all paginated (`pagina`, `porPagina`); `POST /usuarios/:id/suspension { suspendido, motivo }`, `POST /usuarios/:id/verificacion { verificado, nota }`. Liquidaciones are still marked paid through the older `/api/pagos/admin/liquidaciones/:id/pagar`.
+`/api/admin/*` (`routes/admin.js`): `soloAdmin` + `limites.admin` (counts only 403s, so the key can't be brute-forced). `GET /resumen`, `GET /usuarios?tipo=&q=&suspendido=`, `GET /trabajos?estado=&categoria=`, `GET /transacciones?tipo=pagos|liquidaciones&estado=`, `GET /webhooks`, all paginated (`pagina`, `porPagina`); `POST /usuarios/:id/suspension { suspendido, motivo }`, `POST /usuarios/:id/verificacion { verificado, nota }`, `POST /webhooks/:id/reprocesar`. Liquidaciones are still marked paid through the older `/api/pagos/admin/liquidaciones/:id/pagar`.
 
 The panel UI (`public/admin/`) is static and served without auth — the key is typed in the page, kept in `sessionStorage` and sent as `x-admin-key`. It gets its own CSP (`CSP_PANEL_ADMIN` in `seguridad.js`) because helmet's default includes `upgrade-insecure-requests`, which breaks loading `panel.js` over plain `http://localhost`. No inline scripts or `on*=` attributes (CSP), and API data is only ever inserted with `textContent`.
 

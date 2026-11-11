@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase')
 const { notificar } = require('../services/notificacionesService')
 const { faltaMigracion } = require('../services/cuentasService')
+const webhooks = require('../services/webhooksService')
 const { pagosSimulados } = require('../services/mercadoPagoService')
 
 // Panel de administración (rutas /api/admin/*, protegidas por soloAdmin con el header
@@ -271,7 +272,42 @@ async function listarTransacciones(req, res) {
   res.json({ tipo: tabla, transacciones: filas, total: count ?? filas.length, pagina, porPagina })
 }
 
+// GET /api/admin/webhooks?estado= — notificaciones de MP recibidas (webhooksService).
+async function listarWebhooks(req, res) {
+  const { estado } = req.query
+  const { pagina, porPagina, desde, hasta } = paginacion(req.query)
+
+  let consulta = supabase.from('webhooks_mp').select('*', { count: 'exact' })
+    .order('recibido_en', { ascending: false }).range(desde, hasta)
+  if (estado) consulta = consulta.eq('estado', estado)
+
+  const { data, count, error } = await consulta
+  if (error) return responderError(res, 'el listado de webhooks', error)
+
+  res.json({ webhooks: data, total: count ?? data.length, pagina, porPagina })
+}
+
+// POST /api/admin/webhooks/:id/reprocesar — vuelve a pedir el pago a MP y lo procesa.
+// Seguro de repetir: procesarPagoMp es idempotente.
+async function reprocesarWebhook(req, res) {
+  const { id } = req.params
+
+  const { data: evento, error } = await supabase.from('webhooks_mp').select('*').eq('id', id).maybeSingle()
+  if (error) return responderError(res, 'el reproceso del webhook', error)
+  if (!evento) return res.status(404).json({ error: 'Webhook no encontrado' })
+  if (evento.estado === 'rechazado') {
+    return res.status(409).json({ error: 'Este webhook tenía la firma inválida: no se reprocesa' })
+  }
+  if (pagosSimulados()) {
+    return res.status(409).json({ error: 'Los pagos están en modo simulado: no hay a quién consultar el pago' })
+  }
+
+  const resultado = await webhooks.procesarEvento(evento.id, evento.data_id)
+  if (!resultado.ok) return res.status(502).json({ error: resultado.error })
+  res.json({ message: 'Webhook reprocesado', mpEstado: resultado.mpEstado })
+}
+
 module.exports = {
   resumen, listarUsuarios, cambiarSuspension, cambiarVerificacion,
-  listarTrabajos, listarTransacciones,
+  listarTrabajos, listarTransacciones, listarWebhooks, reprocesarWebhook,
 }

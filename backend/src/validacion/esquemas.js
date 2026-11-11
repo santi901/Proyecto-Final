@@ -124,6 +124,10 @@ module.exports = {
     tipo:   z.enum(['pagos', 'liquidaciones']).optional(),
     estado: z.string().trim().max(30).optional(),
   }),
+  webhooksQuery: z.looseObject({
+    ...pagina,
+    estado: z.enum(['recibido', 'procesado', 'error', 'rechazado']).optional(),
+  }),
   suspension:   z.object({
     suspendido: z.boolean(),
     motivo:     opcional(z.string().trim().max(500)),
