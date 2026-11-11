@@ -1,6 +1,7 @@
 const { z } = require('zod')
 const { CATEGORIAS, DIFICULTADES } = require('../services/preciosService')
 const { analizarDatoCobro } = require('../utils/cobro')
+const { errorFechaProgramada } = require('../utils/programacion')
 
 // Mensajes de error de zod en español.
 z.config(z.locales.es())
@@ -22,6 +23,15 @@ const aliasCobro = z.string().trim().superRefine((valor, ctx) => {
   const { error } = analizarDatoCobro(valor)
   if (error) ctx.addIssue({ code: 'custom', message: error })
 })
+
+// Fecha y hora de un trabajo programado. Con zona horaria obligatoria ("2026-11-20T15:00:00-03:00"
+// o "...Z"): sin ella no se sabe a qué hora se refiere. Se normaliza a ISO en UTC.
+const fechaProgramada = z.iso.datetime({ offset: true })
+  .superRefine((valor, ctx) => {
+    const error = errorFechaProgramada(valor)
+    if (error) ctx.addIssue({ code: 'custom', message: error })
+  })
+  .transform((valor) => new Date(valor).toISOString())
 
 const pagina = {
   pagina:    z.coerce.number().int().min(1).max(10000).optional(),
@@ -87,7 +97,10 @@ module.exports = {
     titulo:          texto(100),
     descripcion:     texto(1000),
     cotizacionToken: z.string().min(1).max(4000),
+    programadoPara:  opcional(fechaProgramada),
   }),
+  reprogramar:      z.object({ programadoPara: fechaProgramada.nullable() }),
+  programadosQuery: z.looseObject({ incluirFinalizados: z.enum(['true', 'false']).optional() }),
   validarPin:  z.object({ pin: z.coerce.string().regex(/^\d{6}$/, 'El PIN tiene 6 dígitos') }),
   cancelar:    z.object({ motivo: opcional(z.string().trim().max(500)) }),
   calificar:   z.object({

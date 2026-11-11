@@ -47,7 +47,9 @@ src/controllers/adminController.js    /api/admin/*: summary, users (suspend/veri
 public/admin/                         admin panel UI (plain HTML + JS, no build), served at GET /admin
 src/services/cuentasService.js        account state (suspension), tolerant of the suspension columns being missing
 src/services/webhooksService.js       logs each MP webhook to `webhooks_mp` and processes/reprocesses it
+src/controllers/programacionController.js  scheduled jobs API (list, reschedule)
 src/utils/cobro.js                    CBU/CVU check-digit validation + alias format (mirrored in AppEmployee/lib/cobro.ts)
+src/utils/programacion.js             allowed window for a scheduled job's date
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
 src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
@@ -110,6 +112,10 @@ Commission is tiered on the final price (15% up to $5.000, 12% up to $10.000, 10
 **Webhook log**: every `payment` notification is recorded in `webhooks_mp` (`webhooksService.js`) *after* the response is sent, so logging never delays or breaks the webhook: `recibido` → `procesado`/`error`, or `rechazado` for a bad signature. `POST /api/admin/webhooks/:id/reprocesar` re-fetches the payment from MP and runs `procesarPagoMp` again (safe, it's idempotent). If MP reports a payment we hold (`aprobado`/`liberado`) as `refunded`/`charged_back` (chargeback or a refund made from MP's own dashboard), `procesarPagoMp` only logs it and sets `pagos.ultimo_error` — it deliberately doesn't change state, since a liquidación may already exist.
 
 **Payout method** — `GET/PUT /api/empleados/metodo-cobro { valor, titular? }`. `valor` is validated by `utils/cobro.js` (CBU/CVU: 22 digits with both check digits; `000…` = CVU; alias: 6-20 chars, all-digit aliases rejected as a half-copied CBU). The value stays in `empleados.alias_cobro`, which is what liquidaciones snapshot; the type is always derived from the value (not stored), since `PUT /perfil { aliasCobro }` can still change it. Saving a new alias (either endpoint) also rewrites `alias_cobro` on the worker's **pending** liquidaciones, so the admin transfers to the current account; paid ones are left alone.
+
+### Trabajos programados
+
+`POST /api/trabajos` accepts an optional `programadoPara` (ISO date-time **with** timezone offset, 60 min to 30 days ahead — `utils/programacion.js`), stored in `trabajos.programado_para`. `GET /api/trabajos/programados` lists them (employer: own; worker: assigned + available `disponibles`), `PUT /:id/programacion { programadoPara | null }` lets the owner reschedule while the job is `pago_pendiente`/`pendiente`. **This is only the API surface**: the lifecycle is unchanged — a scheduled job is paid, published, notified and subject to the 15-min reassignment window/poller exactly like an immediate one, and price is quoted at the current time of day. Activating a job when its date arrives (and how that interacts with the poller and pricing) belongs to the separate "sistema de trabajos programados" task (Nacho). `programado_para` is deliberately not in `CAMPOS_PUBLICOS`, so the existing listing endpoints don't depend on that column.
 
 ### Administración
 

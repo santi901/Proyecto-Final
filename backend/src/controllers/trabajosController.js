@@ -49,7 +49,7 @@ async function cotizarTrabajo(req, res) {
 // Categoría, dificultad, ubicación y precio salen de la cotización firmada, no del body.
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { titulo, descripcion, cotizacionToken } = req.body
+  const { titulo, descripcion, cotizacionToken, programadoPara } = req.body
 
   let cotizacion
   try {
@@ -95,6 +95,9 @@ async function crearTrabajo(req, res) {
       pin_hash:             pinHash,
       pin_expira_en:        expira.toISOString(),
       solicitud_expira_en:  plazoPago.toISOString(),
+      // Trabajo programado (opcional, ya validado por esquemas.crearTrabajo). Solo se
+      // manda la columna si viene, así crear un trabajo inmediato no depende de esa columna.
+      ...(programadoPara ? { programado_para: programadoPara } : {}),
     })
     .select(CAMPOS_PUBLICOS)
     .single()
@@ -117,7 +120,7 @@ async function crearTrabajo(req, res) {
 
   // PIN se retorna SOLO aquí — el empleador lo muestra al empleado al llegar
   res.status(201).json({
-    trabajo,
+    trabajo: { ...trabajo, programado_para: programadoPara ?? null },
     pin,
     pago: { estado: pago.estado, monto: pago.monto, checkoutUrl: pago.mp_checkout_url, simulado: pagosSimulados() },
   })
