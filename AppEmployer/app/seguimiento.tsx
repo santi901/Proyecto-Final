@@ -18,8 +18,12 @@ import {
   obtenerPinLocal,
   yaCalificadoLocal,
   formatearDuracion,
+  obtenerMotivosCancelacion,
+  type MotivoCancelacion,
   type Trabajo,
 } from '../lib/trabajos';
+import { formatearProgramacion } from '../lib/programados';
+import SelectorMotivo from '../components/selector-motivo';
 import { abrirCheckout, obtenerEstadoPago, type InfoPago } from '../lib/pagos';
 import { listarEvidencia, type Evidencia } from '../lib/evidencia';
 import FotoEvidencia from '../components/foto-evidencia';
@@ -63,6 +67,10 @@ export default function SeguimientoScreen() {
   const [cancelando, setCancelando] = useState(false);
   /** Lo que respondió el backend al cancelar (incluye cuánto se devolvió). */
   const [mensajeCancelacion, setMensajeCancelacion] = useState('');
+  // Sprint 6: motivo obligatorio para cancelar.
+  const [motivosCancelacion, setMotivosCancelacion] = useState<MotivoCancelacion[] | null>(null);
+  const [motivoCancelacion, setMotivoCancelacion] = useState<string | null>(null);
+  const [detalleCancelacion, setDetalleCancelacion] = useState('');
 
   // Pago con MercadoPago: solo se consulta mientras el trabajo está en 'pago_pendiente'.
   const [pago, setPago] = useState<InfoPago | null>(null);
@@ -243,15 +251,38 @@ export default function SeguimientoScreen() {
     }
   }
 
-  // Cancelar sólo se puede antes de que el trabajo arranque ('pago_pendiente', 'pendiente'
-  // o 'asignado'); el backend lo rechaza una vez que está 'en_progreso'.
+  // Sprint 6: los motivos los da el backend; se piden recién al abrir la confirmación.
+  function abrirCancelar() {
+    setError('');
+    setConfirmandoCancelar(true);
+    if (!motivosCancelacion) {
+      obtenerMotivosCancelacion()
+        .then(setMotivosCancelacion)
+        .catch(e => setError(e?.message ?? 'No pudimos cargar los motivos.'));
+    }
+  }
+
+  // Cancelar sólo se puede antes de que el trabajo arranque ('pago_pendiente', 'programado',
+  // 'pendiente' o 'asignado'); el backend lo rechaza una vez que está 'en_progreso'.
   async function handleCancelar() {
     setError('');
+    if (!motivoCancelacion) { setError('Elegí por qué lo cancelás.'); return; }
+    if (motivoCancelacion === 'otro' && detalleCancelacion.trim().length < 5) {
+      setError('Contanos brevemente por qué lo cancelás.');
+      return;
+    }
     setCancelando(true);
     try {
-      const r = await cancelarTrabajo(trabajoId!);
-      setMensajeCancelacion(r.message);
-      setTrabajo(t => (t ? { ...t, estado: 'cancelado' } : t));
+      const r = await cancelarTrabajo(trabajoId!, motivoCancelacion, detalleCancelacion.trim() || undefined);
+      const p = r.penalizacion;
+      setMensajeCancelacion(
+        p?.bloqueadoHasta
+          ? `${r.message} Como cancelaste varios trabajos seguidos, no vas a poder publicar hasta el ${formatearProgramacion(p.bloqueadoHasta)}.`
+          : p?.penaliza
+          ? `${r.message} Como el trabajador ya lo había aceptado, esta cancelación baja tu puntaje.`
+          : r.message,
+      );
+      setTrabajo(t => (t ? { ...t, estado: 'cancelado', cancelado_por: 'empleador' } : t));
       completadoRef.current = true; // terminal: no hace falta seguir refrescando
       setConfirmandoCancelar(false);
     } catch (e: any) {
@@ -394,12 +425,14 @@ export default function SeguimientoScreen() {
   const enProgreso = trabajo.estado === 'en_progreso';
   const cancelado = trabajo.estado === 'cancelado';
   const esperandoPago = trabajo.estado === 'pago_pendiente';
+  // Sprint 6: pagado y esperando su fecha (el backend lo publica una hora antes).
+  const programado = trabajo.estado === 'programado';
   // El backend sólo deja cancelar antes de que el trabajo arranque.
-  const sePuedeCancelar = esperandoPago || trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
+  const sePuedeCancelar = esperandoPago || programado || trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
   // Lo mismo que aplica el backend al cancelar (trabajosController.porcentajeReembolso).
   const textoReembolso = esperandoPago
     ? 'Todavía no pagaste, así que no se te cobra nada.'
-    : trabajo.estado === 'pendiente'
+    : trabajo.estado === 'pendiente' || programado
     ? 'Como nadie lo aceptó todavía, te devolvemos el 100% del pago.'
     : 'Si el trabajador lo aceptó hace menos de 1:30 min te devolvemos el 100%. Si no, el 80%: el 20% restante compensa al trabajador, que ya iba en camino.';
   const solicitudVencida =
@@ -441,6 +474,8 @@ export default function SeguimientoScreen() {
               ? 'Trabajo cancelado'
               : esperandoPago
               ? 'Esperando tu pago'
+              : programado
+              ? 'Programado — pago acreditado'
               : solicitudVencida
               ? 'Ningún trabajador lo tomó a tiempo'
               : trabajo.estado === 'pendiente'
@@ -453,6 +488,23 @@ export default function SeguimientoScreen() {
 
         <Text className="text-principal text-2xl font-nunito-bold mb-1">{trabajo.titulo}</Text>
         <Text className="text-neutro text-sm font-nunito mb-5">{trabajo.descripcion}</Text>
+
+        {/* Sprint 6: para cuándo es y cuándo se publica */}
+        {trabajo.programado_para && (programado || esperandoPago || trabajo.estado === 'pendiente' || trabajo.estado === 'asignado') ? (
+          <View style={sombra(Paleta.acento)} className="flex-row items-center bg-white rounded-xl px-4 py-3 mb-5">
+            <MaterialIcons name="event" size={20} color={Paleta.principal} />
+            <View className="flex-1 ml-2">
+              <Text className="text-principal text-sm font-nunito-bold">
+                Para el {formatearProgramacion(trabajo.programado_para)}
+              </Text>
+              {programado ? (
+                <Text className="text-neutro text-xs font-nunito leading-4">
+                  Una hora antes se lo mostramos a los trabajadores cercanos. Guardá el PIN de abajo.
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
 
         {solicitudVencida ? (
           <View style={sombra(Paleta.neutro)} className="flex-row items-center bg-fondo-suave rounded-xl px-4 py-3 mb-5">
@@ -667,7 +719,23 @@ export default function SeguimientoScreen() {
                 Se da de baja la publicación y, si ya había un trabajador asignado, se le avisa.
                 No se puede deshacer.
               </Text>
-              <Text className="text-principal text-sm font-nunito-semi mb-4 leading-5">{textoReembolso}</Text>
+              <Text className="text-principal text-sm font-nunito-semi mb-3 leading-5">{textoReembolso}</Text>
+              {trabajo.estado === 'asignado' ? (
+                <Text className="text-error text-xs font-nunito mb-3 leading-4">
+                  El trabajador ya lo aceptó: cancelar ahora baja tu puntaje (lo ven los trabajadores),
+                  y si cancelás seguido no vas a poder publicar por 24 horas.
+                </Text>
+              ) : null}
+
+              <Text className="text-principal text-sm font-nunito-bold mb-2">¿Por qué lo cancelás?</Text>
+              <SelectorMotivo
+                motivos={motivosCancelacion}
+                valor={motivoCancelacion}
+                onCambiar={v => { setMotivoCancelacion(v); setError(''); }}
+                detalle={detalleCancelacion}
+                onDetalle={setDetalleCancelacion}
+              />
+              {error ? <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text> : null}
 
               <Pressable
                 onPress={handleCancelar}
@@ -688,7 +756,7 @@ export default function SeguimientoScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={() => { setError(''); setConfirmandoCancelar(true); }}
+              onPress={abrirCancelar}
               className="mt-6 py-3 items-center active:opacity-70">
               <Text className="text-error text-sm font-nunito-semi underline">Cancelar trabajo</Text>
             </Pressable>
@@ -709,6 +777,7 @@ export default function SeguimientoScreen() {
             <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
               {mensajeCancelacion || 'Este trabajo está cancelado.'}{' '}
               Si todavía lo necesitás, publicalo de nuevo desde &ldquo;Ofrecer trabajo&rdquo;.
+              {trabajo.motivo_cancelacion ? `\nMotivo: ${trabajo.motivo_cancelacion}` : ''}
             </Text>
           </View>
         ) : null}

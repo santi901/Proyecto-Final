@@ -7,7 +7,17 @@ import { apiGet, apiPost } from '../auth';
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
 // 'pago_pendiente' es previo a 'pendiente' (el empleador todavía no pagó): el backend no
 // le muestra esos trabajos al trabajador, pero el tipo lo incluye para que coincida.
-export type EstadoTrabajo = 'pago_pendiente' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// Lo mismo 'programado' (Sprint 6): pagado y esperando su fecha; el backend lo pasa a
+// 'pendiente' (y recién ahí lo ve el trabajador) una hora antes de `programado_para`.
+export type EstadoTrabajo = 'pago_pendiente' | 'programado' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+
+/** Puntaje del empleador (Sprint 6): arranca en 5 y lo bajan sus cancelaciones. */
+export type ReputacionEmpleador = {
+  score: number;
+  trabajosCompletados: number;
+  cancelaciones: number;
+  tasaCancelacion: number;
+};
 
 export type Trabajo = {
   id: string;
@@ -35,6 +45,12 @@ export type Trabajo = {
   cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
   duracionSegundos?: number | null;
+  /** Sprint 6: si es un trabajo programado, para cuándo es (listado y detalle). */
+  programado_para?: string | null;
+  /** Sprint 6, detalle: el motivo de la cancelación, legible. */
+  motivo_cancelacion?: string | null;
+  /** Sprint 6, listado y detalle: el puntaje del empleador que lo publicó. */
+  empleador?: { reputacion: ReputacionEmpleador | null };
 };
 
 /** Lo que cobra el trabajador por este trabajo, ya descontada la comisión de la plataforma. */
@@ -99,12 +115,36 @@ export type ResultadoCompletar = {
   duracionSegundos?: number | null;
 };
 
+export type MotivoCancelacion = { codigo: string; texto: string };
+
+export type ResultadoCancelar = {
+  message: string;
+  /** Sprint 6: cuánto pesó para el score (0.5 / 1 / 1.5) y si quedó bloqueado para aceptar. */
+  penalizacion?: { peso: number; penaliza: boolean; bloqueadoHasta: string | null };
+};
+
+// GET /api/trabajos/motivos-cancelacion — los motivos que acepta el backend para el trabajador.
+export async function obtenerMotivosCancelacion(): Promise<MotivoCancelacion[]> {
+  const { motivos } = await apiGet('/api/trabajos/motivos-cancelacion');
+  return motivos;
+}
+
 /**
  * El trabajador se baja de un trabajo que aceptó. Solo antes de empezarlo (`asignado`), y
- * cuenta para su tasa de cancelación: baja el score de reputación.
+ * cuenta para su tasa de cancelación: baja el score de reputación. Sprint 6: el motivo es
+ * obligatorio, y el peso depende de cuándo cancela (0.5 dentro de 1:30 min de aceptarlo,
+ * 1.5 si es un programado a menos de 2 h); si junta mucho en una semana, 24 h sin aceptar.
  */
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
-  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
+export async function cancelarTrabajo(id: string, motivo: string, detalle?: string): Promise<ResultadoCancelar> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, { motivo, ...(detalle ? { detalle } : {}) });
+}
+
+// "martes 12/11 a las 10:00" — para trabajos programados (hora del celular).
+export function formatearProgramacion(iso: string): string {
+  const d = new Date(iso);
+  const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return `${dias[d.getDay()]} ${dos(d.getDate())}/${dos(d.getMonth() + 1)} a las ${dos(d.getHours())}:${dos(d.getMinutes())}`;
 }
 
 export async function completarTrabajo(id: string): Promise<ResultadoCompletar> {

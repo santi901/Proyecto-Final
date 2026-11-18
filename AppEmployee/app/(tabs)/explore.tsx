@@ -8,6 +8,7 @@ import { Paleta } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
   pago_pendiente: 'Esperando pago',
+  programado: 'Programado',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -18,6 +19,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 // Clases del chip de estado (fondo y texto), con los colores del design system.
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
   pago_pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
+  programado: { fondo: 'bg-white border border-principal', texto: 'text-principal' },
   pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },

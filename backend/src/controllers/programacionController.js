@@ -1,18 +1,20 @@
 const supabase = require('../config/supabase')
+const { estadoAlPublicar } = require('../utils/programacion')
+const { activarTrabajo } = require('../jobs/activarProgramados')
 
 // API de trabajos programados (fecha y hora futura elegida por el empleador).
 //
-// La fecha se recibe al crear el trabajo (POST /api/trabajos { ..., programadoPara }) y
-// se guarda en trabajos.programado_para. Acá están la consulta y la reprogramación.
-// Esta parte NO cambia el ciclo de vida: un trabajo programado se paga, se publica y se
-// acepta igual que uno inmediato. Activarlo cuando llega la fecha es otra tarea
-// (ver "Trabajos programados" en backend/CLAUDE.md).
+// La fecha se recibe al cotizar/crear el trabajo (POST /api/trabajos/cotizar y
+// POST /api/trabajos { ..., programadoPara }) y se guarda en trabajos.programado_para.
+// Acá están la consulta y la reprogramación. La activación cuando llega la fecha
+// (Sprint 6) está en jobs/activarProgramados.js: pagado y lejos de la fecha, el trabajo
+// espera en 'programado'; una hora antes pasa a 'pendiente' y se publica.
 
 const CAMPOS_PROGRAMADO = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, monto_trabajador, estado, latitud, longitud, creado_en, solicitud_expira_en, programado_para, trabajador_id, empleador_id'
 
 // Hasta que alguien lo acepta, el empleador puede cambiar la fecha: después ya
 // hay un trabajador que se comprometió a ese horario.
-const ESTADOS_REPROGRAMABLES = ['pago_pendiente', 'pendiente']
+const ESTADOS_REPROGRAMABLES = ['pago_pendiente', 'programado', 'pendiente']
 const ESTADOS_FINALIZADOS = ['completado', 'cancelado']
 
 // GET /api/trabajos/programados[?incluirFinalizados=true]
@@ -83,13 +85,28 @@ async function reprogramarTrabajo(req, res) {
     return res.status(409).json({ error: 'Solo se puede cambiar la fecha antes de que alguien acepte el trabajo' })
   }
 
+  // Sprint 6: si ya está pagado, la fecha nueva decide si se publica ya o espera.
+  //   pendiente (publicado) → fecha lejana: se retira hasta su hora ('programado').
+  //   programado (esperando) → fecha cercana o sin fecha: se publica ya (abajo).
+  // pago_pendiente no cambia: lo decide el pago cuando se acredite.
+  const cambios = { programado_para: programadoPara }
+  if (trabajo.estado === 'pendiente' && estadoAlPublicar(programadoPara) === 'programado') cambios.estado = 'programado'
+
   // Condicional: si alguien lo aceptó entre la lectura y acá, no se le cambia el horario.
-  const { data: actualizados, error } = await supabase
+  const actualizar = () => supabase
     .from('trabajos')
-    .update({ programado_para: programadoPara })
+    .update(cambios)
     .eq('id', trabajoId)
     .eq('estado', trabajo.estado)
     .select(CAMPOS_PROGRAMADO)
+
+  let { data: actualizados, error } = await actualizar()
+  // 23514: la base todavía no acepta 'programado' (falta la migración del Sprint 6):
+  // se cambia solo la fecha, como antes.
+  if (error?.code === '23514' && cambios.estado) {
+    delete cambios.estado;
+    ({ data: actualizados, error } = await actualizar())
+  }
 
   if (error) {
     console.error(`Error reprogramando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
@@ -100,7 +117,14 @@ async function reprogramarTrabajo(req, res) {
     return res.status(409).json({ error: 'El trabajo cambió de estado, actualizá y probá de nuevo' })
   }
 
-  res.json({ trabajo: actualizados[0] })
+  let actualizado = actualizados[0]
+  if (actualizado.estado === 'programado' && estadoAlPublicar(programadoPara) === 'pendiente') {
+    await activarTrabajo(actualizado, new Date())
+    const { data } = await supabase.from('trabajos').select(CAMPOS_PROGRAMADO).eq('id', trabajoId).maybeSingle()
+    actualizado = data ?? actualizado
+  }
+
+  res.json({ trabajo: actualizado })
 }
 
 module.exports = { listarProgramados, reprogramarTrabajo }

@@ -7,15 +7,17 @@
 const CLAVE_STORAGE = 'changuitapp-admin-key';
 const POR_PAGINA = 25;
 
-const ESTADOS_TRABAJO = ['pago_pendiente', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado'];
+const ESTADOS_TRABAJO = ['pago_pendiente', 'programado', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado'];
+const ESTADOS_DISPUTA = ['abierta', 'en_revision', 'resuelta', 'rechazada'];
 const ESTADOS_PAGO = ['pendiente', 'aprobado', 'liberado', 'reembolsado', 'reembolsado_parcial', 'reembolso_fallido', 'cancelado', 'monto_invalido'];
 const ESTADOS_LIQUIDACION = ['pendiente', 'pagada'];
 const ESTADOS_WEBHOOK = ['recibido', 'procesado', 'error', 'rechazado'];
 
 const COLOR_ESTADO = {
-  completado: 'ok', aprobado: 'ok', liberado: 'ok', pagada: 'ok', procesado: 'ok',
+  completado: 'ok', aprobado: 'ok', liberado: 'ok', pagada: 'ok', procesado: 'ok', resuelta: 'ok',
   pendiente: 'alerta', pago_pendiente: 'alerta', asignado: 'alerta', en_progreso: 'alerta', recibido: 'alerta',
-  cancelado: 'error', reembolso_fallido: 'error', monto_invalido: 'error', error: 'error', rechazado: 'error',
+  programado: 'alerta', abierta: 'alerta', en_revision: 'alerta',
+  cancelado: 'error', reembolso_fallido: 'error', monto_invalido: 'error', error: 'error', rechazado: 'error', rechazada: 'error',
 };
 
 const pesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
@@ -316,7 +318,66 @@ const VISTAS = {
         tabla(['Recibido', 'Pago MP', 'Estado', 'Firma', 'Estado en MP', 'Trabajo', ''], filas),
         paginador(r.total)));
   },
+
+  // Sprint 6 — reportes de problemas de las apps. "Ver" trae el trabajo, la evidencia
+  // y el chat; resolver/rechazar pide la resolución, que se le notifica a quien reportó.
+  async disputas() {
+    const r = await api(`/api/admin/disputas?${query()}`);
+    const detalle = estado.disputaAbierta ? await detalleDisputa(estado.disputaAbierta) : null;
+
+    const cambiar = (d, nuevo, pedirTexto) => async () => {
+      let resolucion = null;
+      if (pedirTexto) {
+        resolucion = prompt(`${nuevo === 'resuelta' ? 'Resolución' : 'Motivo del rechazo'} (se le muestra a ${d.reportante ?? 'quien reportó'}):`);
+        if (!resolucion) return false;
+      }
+      await api(`/api/admin/disputas/${d.id}/estado`, { method: 'POST', body: { estado: nuevo, resolucion } });
+      return `La disputa quedó ${nuevo.replace('_', ' ')}.`;
+    };
+
+    const filas = r.disputas.map((d) => el('tr', {},
+      el('td', {}, fecha(d.creado_en)),
+      el('td', { className: 'largo' }, d.trabajo?.titulo ?? corto(d.trabajo_id),
+        el('div', { className: 'suave' }, d.trabajo ? `trabajo ${d.trabajo.estado}` : '')),
+      el('td', {}, d.reportante ?? corto(d.reportado_por), el('div', { className: 'suave' }, d.rol_reportante)),
+      el('td', { className: 'largo' }, el('strong', {}, d.motivo), el('div', {}, d.descripcion)),
+      el('td', {}, d.fotoUrl ? el('a', { href: d.fotoUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Ver foto') : '—'),
+      el('td', { className: 'largo' }, chip(d.estado), d.resolucion ? el('div', { className: 'suave' }, d.resolucion) : null),
+      el('td', {}, el('div', { className: 'acciones' },
+        botonAccion('Ver', async () => { estado.disputaAbierta = d.id; }),
+        d.estado === 'abierta' ? botonAccion('Tomar', cambiar(d, 'en_revision', false)) : null,
+        ['abierta', 'en_revision'].includes(d.estado) ? botonAccion('Resolver', cambiar(d, 'resuelta', true)) : null,
+        ['abierta', 'en_revision'].includes(d.estado) ? botonAccion('Rechazar', cambiar(d, 'rechazada', true), { peligro: true }) : null))));
+
+    return el('div', {},
+      detalle,
+      el('div', { className: 'filtros' }, selectorFiltro('estado', 'Estado', ESTADOS_DISPUTA)),
+      el('div', { className: 'tarjeta' },
+        tabla(['Fecha', 'Trabajo', 'Reportó', 'Motivo y descripción', 'Foto', 'Estado', ''], filas),
+        paginador(r.total)));
+  },
 };
+
+// Tarjeta con todo lo que hace falta para decidir una disputa.
+async function detalleDisputa(id) {
+  const { disputa: d, trabajo: t, evidencias, mensajes } = await api(`/api/admin/disputas/${id}`);
+  const cerrar = el('button', { className: 'accion', type: 'button', onclick: () => { estado.disputaAbierta = null; dibujar(); } }, 'Cerrar');
+  return el('div', { className: 'tarjeta', style: 'margin-bottom:16px' },
+    el('div', { className: 'filtros' }, el('strong', {}, `Disputa ${corto(d.id)} · `), chip(d.estado), cerrar),
+    el('p', {}, el('strong', {}, d.motivo), ` — ${d.descripcion}`),
+    t ? el('p', { className: 'suave' },
+      `${t.titulo} · ${t.categoria} · ${t.nivel_dificultad ?? ''} · ${dinero(t.precio)} · ${t.estado}`,
+      t.cancelado_por ? ` · cancelado por ${t.cancelado_por}: ${t.motivo_cancelacion ?? ''}` : '') : null,
+    el('p', {}, el('strong', {}, 'Evidencia del trabajador: '),
+      evidencias.length
+        ? evidencias.map((e, i) => el('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, ` foto ${i + 1}`))
+        : el('span', { className: 'suave' }, 'no hay')),
+    el('p', {}, el('strong', {}, `Chat (${mensajes.length} mensajes)`)),
+    mensajes.length
+      ? el('div', { className: 'tabla' }, mensajes.map((m) => el('div', {},
+        el('span', { className: 'suave' }, `${fecha(m.enviado_en)} · ${m.remitente_tipo}: `), m.mensaje)))
+      : el('p', { className: 'suave' }, 'Sin mensajes.'));
+}
 
 // ── Sesión ───────────────────────────────────────────────────────────────────
 

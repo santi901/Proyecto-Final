@@ -16,6 +16,7 @@ const adminRoutes        = require('./src/routes/admin')
 const errorHandler       = require('./src/middleware/errorHandler')
 const { configurarProxy, forzarHttps, headersSeguridad, limites, CSP_PANEL_ADMIN } = require('./src/middleware/seguridad')
 const { iniciarReasignacionAutomatica } = require('./src/jobs/reasignarTrabajos')
+const { iniciarActivacionProgramados } = require('./src/jobs/activarProgramados')
 const { configurarSocket } = require('./src/realtime/socket')
 const { pagosSimulados } = require('./src/services/mercadoPagoService')
 
@@ -62,6 +63,7 @@ app.use(errorHandler)
 const httpServer = http.createServer(app)
 configurarSocket(httpServer)
 iniciarReasignacionAutomatica()
+iniciarActivacionProgramados()  // Sprint 6: publica los programados una hora antes de su fecha
 
 httpServer.listen(PORT, () => {
   console.log(`ChanguitApp backend corriendo en http://localhost:${PORT}`)

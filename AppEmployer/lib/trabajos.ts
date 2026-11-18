@@ -8,7 +8,9 @@ import { apiGet, apiPost } from '../auth';
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
 // 'pago_pendiente': recién creado, todavía no se acreditó el pago en MercadoPago. No se
 // publica (nadie lo ve ni se notifica) hasta que pasa a 'pendiente'. Ver lib/pagos.ts.
-export type EstadoTrabajo = 'pago_pendiente' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// 'programado' (Sprint 6): pagado, esperando su fecha. El backend lo publica solo
+// ('pendiente') una hora antes de `programado_para`.
+export type EstadoTrabajo = 'pago_pendiente' | 'programado' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type TrabajadorAsignado = {
   id: string;
@@ -49,6 +51,10 @@ export type Trabajo = {
   cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`). */
   duracionSegundos?: number | null;
+  /** Detalle: para cuándo está programado (null = lo antes posible). */
+  programado_para?: string | null;
+  /** Detalle: el motivo de la cancelación, legible. */
+  motivo_cancelacion?: string | null;
 };
 
 export type Cotizacion = {
@@ -69,11 +75,14 @@ export type Cotizacion = {
 // POST /api/trabajos/cotizar — el precio lo calcula el backend (categoría, dificultad,
 // demanda en la zona y horario). El token dura 10 minutos y es lo que hay que mandar
 // al crear el trabajo: así se cobra exactamente el precio que se mostró.
+// `programadoPara` (Sprint 6, ISO): el recargo por horario se calcula con esa fecha y la
+// fecha queda dentro del token — si el empleador cambia la fecha, hay que volver a cotizar.
 export async function cotizarTrabajo(datos: {
   categoria: string;
   nivelDificultad: string;
   latitud: number;
   longitud: number;
+  programadoPara?: string | null;
 }): Promise<{ cotizacion: Cotizacion; cotizacionToken: string; validaHasta: string }> {
   return apiPost('/api/trabajos/cotizar', datos);
 }
@@ -136,15 +145,27 @@ export type ResultadoCancelar = {
     /** 'pendiente' = MP no respondió; el backend lo reintenta solo. */
     estado: 'sin_pago' | 'procesado' | 'pendiente';
   };
+  /** Sprint 6: cuánto le pesa al score (0 = nada) y si quedó bloqueado para publicar. */
+  penalizacion?: { peso: number; penaliza: boolean; bloqueadoHasta: string | null };
 };
 
+export type MotivoCancelacion = { codigo: string; texto: string };
+
+// GET /api/trabajos/motivos-cancelacion — los motivos que acepta el backend para este rol.
+export async function obtenerMotivosCancelacion(): Promise<MotivoCancelacion[]> {
+  const { motivos } = await apiGet('/api/trabajos/motivos-cancelacion');
+  return motivos;
+}
+
 /**
- * Cancela un trabajo `pago_pendiente`, `pendiente` o `asignado`. Solo el empleador dueño.
- * Reembolso: 100% si nadie lo aceptó o si el trabajador lo aceptó hace menos de 1:30 min;
- * pasado eso, 80% (el 20% compensa al trabajador que ya estaba en camino).
+ * Cancela un trabajo `pago_pendiente`, `programado`, `pendiente` o `asignado`. Solo el
+ * empleador dueño. Reembolso: 100% si nadie lo aceptó o si el trabajador lo aceptó hace
+ * menos de 1:30 min; pasado eso, 80% (el 20% compensa al trabajador que ya estaba en camino).
+ * Sprint 6: el motivo es obligatorio (código de obtenerMotivosCancelacion; si es 'otro',
+ * también el detalle). Si ya había un trabajador asignado, baja el score del empleador.
  */
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<ResultadoCancelar> {
-  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
+export async function cancelarTrabajo(id: string, motivo: string, detalle?: string): Promise<ResultadoCancelar> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, { motivo, ...(detalle ? { detalle } : {}) });
 }
 
 // El PIN solo viaja una vez en la respuesta de crearTrabajo (el backend guarda el hash,

@@ -6,16 +6,52 @@ const { emitirFinTrabajo } = require('../realtime/socket')
 const { cotizar, firmarCotizacion, verificarCotizacion } = require('../services/preciosService')
 const { MINUTOS_PARA_PAGAR, pagosSimulados } = require('../services/mercadoPagoService')
 const pagos = require('../services/pagosService')
-const { obtenerReputacion, actualizarReputacion } = require('../services/reputacionService')
+const { obtenerReputacion, actualizarReputacion, obtenerReputacionesEmpleadores } = require('../services/reputacionService')
+const {
+  MOTIVOS_CANCELACION, VENTANA_GRACIA_SEG, validarMotivo, calcularPeso, registrarCancelacion, verificarBloqueo,
+} = require('../services/cancelacionesService')
+const { faltaMigracion } = require('../services/cuentasService')
 
 const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, comision_porcentaje, comision_monto, monto_trabajador, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en, cancelado_por'
 
-const ESTADOS_CANCELABLES = ['pago_pendiente', 'pendiente', 'asignado']
+// 'programado' (Sprint 6): pagado y esperando su fecha; se puede cancelar (reembolso 100%).
+const ESTADOS_CANCELABLES = ['pago_pendiente', 'programado', 'pendiente', 'asignado']
 
 // Cancelar con un trabajador ya asignado: gratis dentro de esta ventana desde que
 // aceptó; pasada la ventana se retiene una parte como compensación al trabajador.
-const VENTANA_CANCELACION_GRATIS_SEG = 90
+// Es la misma ventana de gracia que usa la penalización de score (cancelacionesService).
+const VENTANA_CANCELACION_GRATIS_SEG = VENTANA_GRACIA_SEG
 const PENALIDAD_CANCELACION_PORCENTAJE = 20
+
+// "13/11 a las 18:30", en hora argentina (el server puede correr en UTC).
+function formatearFechaHora(iso) {
+  return new Date(iso).toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace(', ', ' a las ')
+}
+
+function mensajeBloqueo(bloqueo, accion) {
+  return `Cancelaste varios trabajos en los últimos días, así que no podés ${accion} hasta el ${formatearFechaHora(bloqueo.hasta)}.`
+}
+
+// Columnas del Sprint 6 que un trabajo puede tener o no según la base (programado_para,
+// motivo_cancelacion): se leen aparte para que CAMPOS_PUBLICOS no dependa de ellas.
+async function camposExtra(trabajoId) {
+  const { data, error } = await supabase
+    .from('trabajos').select('programado_para, motivo_cancelacion').eq('id', trabajoId).maybeSingle()
+  if (error) {
+    if (!faltaMigracion(error)) console.error(`Error leyendo programación/motivo (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return {}
+  }
+  return data ?? {}
+}
+
+// GET /api/trabajos/motivos-cancelacion — los motivos válidos para el rol de quien pregunta.
+function motivosCancelacion(req, res) {
+  const rol = req.usuario.tipo === 'empleado' ? 'empleado' : 'empleador'
+  res.json({ motivos: Object.entries(MOTIVOS_CANCELACION[rol]).map(([codigo, texto]) => ({ codigo, texto })) })
+}
 
 const MAX_LARGO_COMENTARIO = 500
 
@@ -31,8 +67,10 @@ function calcularDuracionSegundos(trabajo) {
 // Devuelve un token firmado con la cotización, que hay que mandar al crear el trabajo.
 async function cotizarTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { categoria, nivelDificultad, latitud, longitud } = req.body
-  const datos = { categoria, nivelDificultad, latitud, longitud }
+  const { categoria, nivelDificultad, latitud, longitud, programadoPara } = req.body
+  // programadoPara (Sprint 6) viaja dentro del token: el precio con recargo horario
+  // queda atado a esa fecha.
+  const datos = { categoria, nivelDificultad, latitud, longitud, ...(programadoPara ? { programadoPara } : {}) }
 
   try {
     const cotizacion = await cotizar(datos)
@@ -49,7 +87,7 @@ async function cotizarTrabajo(req, res) {
 // Categoría, dificultad, ubicación y precio salen de la cotización firmada, no del body.
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { titulo, descripcion, cotizacionToken, programadoPara } = req.body
+  const { titulo, descripcion, cotizacionToken } = req.body
 
   let cotizacion
   try {
@@ -57,6 +95,15 @@ async function crearTrabajo(req, res) {
   } catch (error) {
     console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): cotización inválida o vencida (${error.message}).`)
     return res.status(400).json({ error: 'La cotización venció o no es válida. Volvé a calcular el precio.' })
+  }
+
+  // Sprint 6: la fecha del programado sale de la cotización firmada (como la categoría),
+  // porque el precio depende de ella. Si el body trae otra, el precio que vio el
+  // empleador no corresponde: hay que volver a cotizar.
+  const programadoPara = cotizacion.programadoPara ?? null
+  if (req.body.programadoPara && req.body.programadoPara !== programadoPara) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): programadoPara ${req.body.programadoPara} distinto del cotizado (${programadoPara}).`)
+    return res.status(400).json({ error: 'La fecha no coincide con la cotización. Volvé a calcular el precio.' })
   }
 
   // Buscar perfil del empleador
@@ -68,9 +115,19 @@ async function crearTrabajo(req, res) {
     return res.status(400).json({ error: 'Completá tu perfil antes de crear un trabajo' })
   }
 
+  // Sprint 6: consecuencia de cancelar demasiado — bloqueo temporal para publicar.
+  const bloqueo = await verificarBloqueo('empleador', perfil.id)
+  if (bloqueo.bloqueado) {
+    console.error(`Creación de trabajo rechazada (empleadorId=${perfil.id}): bloqueado por cancelaciones hasta ${bloqueo.hasta}.`)
+    return res.status(403).json({ error: mensajeBloqueo(bloqueo, 'publicar trabajos'), bloqueadoHasta: bloqueo.hasta })
+  }
+
   const pin     = generarPin()
   const pinHash = await hashearPin(pin)
-  const expira  = new Date(); expira.setHours(expira.getHours() + 24)
+  // El PIN vale 24h desde que el trabajo puede empezar: para un programado, desde su
+  // fecha (si no, uno programado a 3 días tendría el PIN vencido al llegar).
+  const expira  = new Date(programadoPara ? new Date(programadoPara).getTime() : Date.now())
+  expira.setHours(expira.getHours() + 24)
 
   // Mientras está en 'pago_pendiente', solicitud_expira_en es el plazo para pagar
   // (el poller lo cancela pasado ese tiempo). Al acreditarse el pago se reinicia
@@ -217,13 +274,38 @@ async function listarTrabajos(req, res) {
   // Empleado: ver trabajos disponibles. Se excluyen los 'pendiente' cuya solicitud
   // ya expiró (chequeo lazy, igual que el PIN: no hay cron que los cancele).
   const { data: trabajos, error } = await supabase
-    .from('trabajos').select(CAMPOS_PUBLICOS)
+    .from('trabajos').select(`${CAMPOS_PUBLICOS}, empleador_id`)
     .eq('estado', 'pendiente')
     .gt('solicitud_expira_en', new Date().toISOString())
     .order('creado_en', { ascending: false })
 
   if (error) return res.status(500).json({ error: 'Error listando trabajos' })
-  res.json({ trabajos })
+
+  // Sprint 6: el trabajador ve el score del empleador (lo bajan sus cancelaciones)
+  // antes de aceptar. Se calcula en lote, no una consulta por trabajo.
+  const [reputaciones, programaciones] = await Promise.all([
+    obtenerReputacionesEmpleadores((trabajos ?? []).map(t => t.empleador_id)),
+    programacionesDe((trabajos ?? []).map(t => t.id)),
+  ])
+  res.json({
+    trabajos: (trabajos ?? []).map(({ empleador_id, ...t }) => ({
+      ...t,
+      // Si es un programado (ya activado), el trabajador ve para cuándo es antes de aceptar.
+      programado_para: programaciones[t.id] ?? null,
+      empleador: { reputacion: reputaciones[empleador_id] ?? null },
+    })),
+  })
+}
+
+// { [trabajoId]: programado_para } en una sola consulta; vacío si la columna no existe.
+async function programacionesDe(ids) {
+  if (!ids.length) return {}
+  const { data, error } = await supabase.from('trabajos').select('id, programado_para').in('id', ids)
+  if (error) {
+    if (!faltaMigracion(error)) console.error(`Error leyendo programaciones: ${error.message ?? error}`)
+    return {}
+  }
+  return Object.fromEntries((data ?? []).filter(t => t.programado_para).map(t => [t.id, t.programado_para]))
 }
 
 // GET /api/trabajos/mios — a diferencia de listarTrabajos (que para un empleado
@@ -296,7 +378,22 @@ async function obtenerTrabajo(req, res) {
     }
   }
 
-  res.json({ trabajo: { ...trabajo, duracionSegundos, trabajador } })
+  // Sprint 6: el trabajador ve el score del empleador; las dos partes ven la fecha
+  // programada y el motivo si se canceló.
+  let empleador
+  if (tipo === 'empleado') {
+    const reputaciones = await obtenerReputacionesEmpleadores([trabajo.empleador_id])
+    empleador = { reputacion: reputaciones[trabajo.empleador_id] ?? null }
+  }
+  const extra = await camposExtra(trabajoId)
+
+  res.json({
+    trabajo: {
+      ...trabajo, duracionSegundos, trabajador, empleador,
+      programado_para:    extra.programado_para ?? null,
+      motivo_cancelacion: extra.motivo_cancelacion ?? null,
+    },
+  })
 }
 
 async function aceptarTrabajo(req, res) {
@@ -320,6 +417,13 @@ async function aceptarTrabajo(req, res) {
   if (trabajo.solicitud_expira_en && new Date(trabajo.solicitud_expira_en) < new Date()) {
     console.error(`Aceptar trabajo rechazado (trabajoId=${trabajoId}): la solicitud expiró.`)
     return res.status(409).json({ error: 'La solicitud para este trabajo expiró' })
+  }
+
+  // Sprint 6: consecuencia de cancelar demasiado — bloqueo temporal para aceptar.
+  const bloqueo = await verificarBloqueo('empleado', empleado.id)
+  if (bloqueo.bloqueado) {
+    console.error(`Aceptar trabajo rechazado (empleadoId=${empleado.id}): bloqueado por cancelaciones hasta ${bloqueo.hasta}.`)
+    return res.status(403).json({ error: mensajeBloqueo(bloqueo, 'aceptar trabajos'), bloqueadoHasta: bloqueo.hasta })
   }
 
   const { data: aceptado, error } = await supabase
@@ -525,16 +629,33 @@ function porcentajeReembolso(trabajo, canceladoPor) {
 //                    después 80%, y el 20% retenido se le liquida al trabajador.
 // El trabajador asignado también puede bajarse, solo en 'asignado' (reembolso del 100%).
 // Una vez validado el PIN (en_progreso) ya no se puede cancelar por acá.
+//
+// Sprint 6: el motivo es obligatorio ({ motivo: código, detalle? }, ver
+// cancelacionesService.MOTIVOS_CANCELACION) y la cancelación queda en la tabla
+// `cancelaciones` con un peso que baja el score de quien canceló y puede bloquearlo.
 async function cancelarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId, tipo } = req.usuario
-  const { motivo } = req.body ?? {}
+  const { motivo, detalle } = req.body
+  const rol = tipo === 'empleado' ? 'empleado' : 'empleador'
+
+  let motivoValidado
+  try {
+    motivoValidado = validarMotivo(rol, motivo, detalle)
+  } catch (error) {
+    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): ${error.message}`)
+    return res.status(error.status ?? 400).json({ error: error.message })
+  }
 
   const { data: trabajo } = await supabase
     .from('trabajos').select('id, titulo, estado, empleador_id, trabajador_id, asignado_en').eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
+  // Aparte: programado_para puede no existir en una base vieja (ver camposExtra).
+  const { programado_para: programadoPara } = await camposExtra(trabajoId)
 
+  // perfilId = empleados.id o perfiles.id de quien cancela (tabla cancelaciones).
+  let perfilId
   if (tipo === 'empleado') {
     // Sprint 5: el trabajador puede bajarse de un trabajo que aceptó, pero solo antes
     // de arrancarlo (asignado). Cuenta para su tasa de cancelación (reputacionService).
@@ -548,6 +669,7 @@ async function cancelarTrabajo(req, res) {
       console.error(`Cancelación de empleado rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}'.`)
       return res.status(409).json({ error: 'Solo podés cancelar un trabajo antes de empezarlo' })
     }
+    perfilId = empleado.id
   } else {
     const { data: perfil } = await supabase
       .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
@@ -560,24 +682,31 @@ async function cancelarTrabajo(req, res) {
       console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
       return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
     }
+    perfilId = perfil.id
   }
 
-  // Se calcula antes del update: la ventana gratis corre hasta que el empleador tocó "cancelar".
+  // Se calculan antes del update: la ventana gratis corre hasta que se tocó "cancelar".
   const porcentaje = porcentajeReembolso(trabajo, tipo)
+  const peso = calcularPeso({ estadoPrevio: trabajo.estado, asignadoEn: trabajo.asignado_en, programadoPara })
 
   // Condicional sobre el estado leído: si el trabajador validó el PIN (o el
   // poller lo canceló) en el medio, no se cancela ni se reembolsa.
-  const { data: cancelados, error } = await supabase
-    .from('trabajos')
-    .update({
-      estado: 'cancelado',
-      cancelado_por: tipo === 'empleado' ? 'empleado' : 'empleador',
-      cancelado_en: new Date().toISOString(),
-      motivo_cancelacion: motivo ?? null,
-    })
-    .eq('id', trabajoId)
-    .eq('estado', trabajo.estado)
-    .select('id')
+  const cambios = {
+    estado: 'cancelado',
+    cancelado_por: rol,
+    cancelado_en: new Date().toISOString(),
+    motivo_cancelacion: motivoValidado.texto,
+    motivo_cancelacion_codigo: motivoValidado.codigo,
+  }
+  let { data: cancelados, error } = await supabase
+    .from('trabajos').update(cambios).eq('id', trabajoId).eq('estado', trabajo.estado).select('id')
+
+  // Base sin la columna nueva del Sprint 6: se cancela igual, sin el código.
+  if (error && faltaMigracion(error)) {
+    delete cambios.motivo_cancelacion_codigo;
+    ({ data: cancelados, error } = await supabase
+      .from('trabajos').update(cambios).eq('id', trabajoId).eq('estado', trabajo.estado).select('id'))
+  }
 
   if (error) {
     console.error(`Error cancelando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
@@ -618,7 +747,21 @@ async function cancelarTrabajo(req, res) {
     procesado: `Trabajo cancelado. Te devolvimos $${reembolso.monto} (${reembolso.porcentaje}%).`,
     pendiente: `Trabajo cancelado. El reembolso de $${reembolso.monto} se está procesando.`,
   }
-  res.json({ message: tipo === 'empleado' ? 'Cancelaste el trabajo.' : mensajes[reembolso.estado], reembolso })
+  // Sprint 6: queda registrada con su peso; el bloqueo se calcula ya contando esta.
+  await registrarCancelacion({
+    trabajoId, rol, usuarioId, perfilId,
+    estadoPrevio: trabajo.estado,
+    codigo:       motivoValidado.codigo,
+    detalle:      motivoValidado.detalle,
+    peso,
+  })
+  const bloqueo = peso > 0 ? await verificarBloqueo(rol, perfilId) : null
+
+  res.json({
+    message: tipo === 'empleado' ? 'Cancelaste el trabajo.' : mensajes[reembolso.estado],
+    reembolso,
+    penalizacion: { peso, penaliza: peso > 0, bloqueadoHasta: bloqueo?.bloqueado ? bloqueo.hasta : null },
+  })
 
   emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
 
@@ -626,7 +769,7 @@ async function cancelarTrabajo(req, res) {
     notificarEmpleador(trabajo.empleador_id, {
       tipo:    'cambio_estado',
       titulo:  'El trabajador canceló',
-      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}". Te devolvimos el pago completo; podés volver a publicarlo.`,
+      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}" (${motivoValidado.texto}). Te devolvimos el pago completo; podés volver a publicarlo.`,
       trabajoId,
     })
   } else if (trabajo.trabajador_id) {
@@ -634,8 +777,8 @@ async function cancelarTrabajo(req, res) {
       tipo:    'cambio_estado',
       titulo:  'Trabajo cancelado',
       mensaje: porcentaje < 100
-        ? 'El empleador canceló este trabajo. Vas a recibir una compensación por el traslado.'
-        : 'El empleador canceló este trabajo.',
+        ? `El empleador canceló este trabajo (${motivoValidado.texto}). Vas a recibir una compensación por el traslado.`
+        : `El empleador canceló este trabajo (${motivoValidado.texto}).`,
       trabajoId,
     })
   }
@@ -834,4 +977,5 @@ module.exports = {
   cotizarTrabajo, crearTrabajo, obtenerEstadoPago, simularPago, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
   cancelarTrabajo, obtenerCandidatos, obtenerCalificacion, historialTrabajos,
+  motivosCancelacion,
 }

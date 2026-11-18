@@ -1,8 +1,7 @@
 // Trabajos programados: el empleador elige una fecha y hora futura para el trabajo.
 //
-// Acá solo están los límites de la fecha (se usan al crear y al reprogramar). Qué
-// pasa cuando llega esa fecha (activarlo, avisar, reabrir la búsqueda) no está
-// implementado en esta parte: ver "Trabajos programados" en backend/CLAUDE.md.
+// Acá están los límites de la fecha (se usan al crear y al reprogramar) y la regla de
+// cuándo se publica (Sprint 6, ver jobs/activarProgramados.js).
 
 // El pago tiene 30 min de plazo y después hay que encontrar a alguien: con menos
 // de una hora de anticipación no tiene sentido programarlo.
@@ -22,4 +21,20 @@ function errorFechaProgramada(fecha, ahora = Date.now()) {
   return null
 }
 
-module.exports = { MIN_ANTICIPACION_MINUTOS, MAX_ANTICIPACION_DIAS, errorFechaProgramada }
+// Sprint 6 — cuánto antes de la fecha se le muestra el trabajo a los trabajadores.
+// Es la misma anticipación mínima para programar: el trabajador tiene que verlo,
+// aceptarlo (ventana de 15 min + reintentos) y llegar.
+const ANTICIPACION_PUBLICACION_MINUTOS = MIN_ANTICIPACION_MINUTOS
+
+// Con el pago acreditado, ¿el trabajo se publica ya ('pendiente') o espera su fecha
+// ('programado')? Inmediato o fecha cercana → se publica.
+function estadoAlPublicar(programadoPara, ahora = Date.now()) {
+  if (!programadoPara) return 'pendiente'
+  const falta = new Date(programadoPara).getTime() - ahora
+  return falta > ANTICIPACION_PUBLICACION_MINUTOS * 60 * 1000 ? 'programado' : 'pendiente'
+}
+
+module.exports = {
+  MIN_ANTICIPACION_MINUTOS, MAX_ANTICIPACION_DIAS, ANTICIPACION_PUBLICACION_MINUTOS,
+  errorFechaProgramada, estadoAlPublicar,
+}

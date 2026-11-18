@@ -14,6 +14,7 @@ import { Paleta, sombra } from '@/constants/theme';
 
 const ESTADO_PAGO: Record<EstadoTrabajo, { texto: string; color: string }> = {
   pago_pendiente: { texto: 'Sin pagar', color: Paleta.error },
+  programado: { texto: 'Pagado · retenido', color: Paleta.principal },
   pendiente: { texto: 'Pagado · retenido', color: Paleta.principal },
   asignado: { texto: 'Pagado · retenido', color: Paleta.principal },
   en_progreso: { texto: 'Pagado · retenido', color: Paleta.principal },

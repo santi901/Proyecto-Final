@@ -120,7 +120,10 @@ async function contarTrabajosPendientesCerca({ categoria, latitud, longitud }) {
   ).length
 }
 
-async function cotizar({ categoria, nivelDificultad, latitud, longitud }) {
+// Sprint 6: un trabajo programado se cotiza con la hora en que se va a hacer, no con la
+// de ahora (si no, uno programado para el domingo a las 23 h se cobraría sin recargo).
+// La demanda sí es la de ahora: es lo único que se puede medir.
+async function cotizar({ categoria, nivelDificultad, latitud, longitud, programadoPara }) {
   const [trabajosPendientes, trabajadores] = await Promise.all([
     contarTrabajosPendientesCerca({ categoria, latitud, longitud }),
     buscarTrabajadoresCerca({ categoria, latitud, longitud }),
@@ -130,6 +133,7 @@ async function cotizar({ categoria, nivelDificultad, latitud, longitud }) {
     categoria, nivelDificultad,
     trabajosPendientes,
     trabajadoresDisponibles: trabajadores.length,
+    fecha: programadoPara ? new Date(programadoPara) : new Date(),
   })
 }
 

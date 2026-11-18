@@ -92,6 +92,9 @@ module.exports = {
     nivelDificultad: z.enum(DIFICULTADES),
     latitud,
     longitud,
+    // Sprint 6: si viene, el recargo por horario se calcula con esta fecha y queda
+    // dentro del token (crearTrabajo toma la fecha de ahí, no del body).
+    programadoPara:  opcional(fechaProgramada),
   }),
   crearTrabajo: z.object({
     titulo:          texto(100),
@@ -102,7 +105,12 @@ module.exports = {
   reprogramar:      z.object({ programadoPara: fechaProgramada.nullable() }),
   programadosQuery: z.looseObject({ incluirFinalizados: z.enum(['true', 'false']).optional() }),
   validarPin:  z.object({ pin: z.coerce.string().regex(/^\d{6}$/, 'El PIN tiene 6 dígitos') }),
-  cancelar:    z.object({ motivo: opcional(z.string().trim().max(500)) }),
+  // Sprint 6: motivo obligatorio. Es un código de MOTIVOS_CANCELACION (cancelacionesService);
+  // que corresponda al rol de quien cancela se chequea en el controller.
+  cancelar:    z.object({
+    motivo:  z.string({ error: 'Elegí el motivo de la cancelación' }).trim().min(1, 'Elegí el motivo de la cancelación').max(40),
+    detalle: opcional(z.string().trim().max(300)),
+  }),
   calificar:   z.object({
     puntaje:    z.number().int().min(1).max(5),
     comentario: opcional(z.string().trim().max(500)),
@@ -135,8 +143,17 @@ module.exports = {
   }),
   trabajosAdminQuery: z.looseObject({
     ...pagina,
-    estado:    z.enum(['pago_pendiente', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado']).optional(),
+    estado:    z.enum(['pago_pendiente', 'programado', 'pendiente', 'asignado', 'en_progreso', 'completado', 'cancelado']).optional(),
     categoria: categoria.optional(),
+  }),
+  // Sprint 6 — disputas en el panel de admin.
+  disputasQuery: z.looseObject({
+    ...pagina,
+    estado: z.enum(['abierta', 'en_revision', 'resuelta', 'rechazada']).optional(),
+  }),
+  cambiarDisputa: z.object({
+    estado:     z.enum(['en_revision', 'resuelta', 'rechazada']),
+    resolucion: opcional(z.string().trim().max(1000)),
   }),
   transaccionesQuery: z.looseObject({
     ...pagina,

@@ -33,12 +33,8 @@ function recibirMultipart(req, res, next) {
 // fotos en base64 pesan varios MB.
 const recibirJson = express.json({ limit: '15mb' })
 
-// Por los primeros bytes, no por lo que diga el cliente.
-function tipoPorContenido(buffer) {
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
-  if (buffer.length >= 4 && buffer.readUInt32BE(0) === 0x89504e47) return 'image/png'
-  return null
-}
+// Por los primeros bytes, no por lo que diga el cliente (utils/imagenes.js).
+const { tipoPorContenido } = require('../utils/imagenes')
 
 function normalizarImagenes(req, res, next) {
   let imagenes

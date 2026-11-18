@@ -21,10 +21,14 @@ import {
   validarPin,
   completarTrabajo,
   formatearDuracion,
+  formatearProgramacion,
+  obtenerMotivosCancelacion,
+  type MotivoCancelacion,
   type Trabajo,
   montoTrabajador,
 } from '../lib/trabajos';
 import { subirEvidencia } from '../lib/evidencia';
+import SelectorMotivo from '../components/selector-motivo';
 import { Paleta } from '@/constants/theme';
 
 // Pantalla de trabajo en curso. Cubre los tres momentos del trabajo aceptado:
@@ -57,9 +61,14 @@ export default function TrabajoEnCursoScreen() {
   const [finalizando, setFinalizando] = useState(false);
   /** Ya confirmé la finalización, pero el empleador todavía no. */
   const [esperandoOtraParte, setEsperandoOtraParte] = useState(false);
-  // Cancelar pide un segundo toque (no hay confirm() en web).
+  // Cancelar abre un panel con el motivo (Sprint 6) y un botón de confirmación
+  // (no hay confirm() en web).
   const [confirmandoCancelar, setConfirmandoCancelar] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  const [motivos, setMotivos] = useState<MotivoCancelacion[] | null>(null);
+  const [motivo, setMotivo] = useState<string | null>(null);
+  const [detalle, setDetalle] = useState('');
+  const [avisoPenalizacion, setAvisoPenalizacion] = useState('');
 
   const [ultimaPos, setUltimaPos] = useState<Coordenadas | null>(null);
 
@@ -131,19 +140,36 @@ export default function TrabajoEnCursoScreen() {
   }
 
   // ----- Cancelar (solo antes de validar el PIN) -----
-  async function handleCancelar() {
-    if (!confirmandoCancelar) { setConfirmandoCancelar(true); return; }
+  function abrirCancelar() {
     setError('');
+    setConfirmandoCancelar(true);
+    if (!motivos) {
+      obtenerMotivosCancelacion().then(setMotivos).catch(e => setError(e?.message ?? 'No pudimos cargar los motivos.'));
+    }
+  }
+
+  async function handleCancelar() {
+    setError('');
+    if (!motivo) { setError('Elegí por qué no podés hacerlo.'); return; }
+    if (motivo === 'otro' && detalle.trim().length < 5) { setError('Contanos brevemente qué pasó.'); return; }
+
     setCancelando(true);
     try {
-      await cancelarTrabajo(trabajoId!);
+      const { penalizacion } = await cancelarTrabajo(trabajoId!, motivo, detalle.trim() || undefined);
       setTrabajo(t => (t ? { ...t, estado: 'cancelado', cancelado_por: 'empleado' } : t));
       completadoRef.current = true;
+      setConfirmandoCancelar(false);
+      if (penalizacion?.bloqueadoHasta) {
+        setAvisoPenalizacion(`Por cancelar varios trabajos seguidos no vas a poder aceptar trabajos hasta el ${formatearProgramacion(penalizacion.bloqueadoHasta)}.`);
+      } else if (penalizacion && penalizacion.peso < 1) {
+        setAvisoPenalizacion('Cancelaste enseguida de aceptarlo, así que cuenta menos para tu puntaje.');
+      } else if (penalizacion && penalizacion.peso > 1) {
+        setAvisoPenalizacion('Cancelaste muy cerca del horario del trabajo: cuenta más para tu puntaje.');
+      }
     } catch (e: any) {
       setError(e?.message ?? 'No pudimos cancelar el trabajo.');
     } finally {
       setCancelando(false);
-      setConfirmandoCancelar(false);
     }
   }
 
@@ -293,6 +319,12 @@ export default function TrabajoEnCursoScreen() {
             ? 'Cancelaste este trabajo y le avisamos al empleador. Las cancelaciones bajan tu score de reputación.'
             : 'El empleador canceló este trabajo. No afecta tu reputación.'}
         </Text>
+        {trabajo.motivo_cancelacion ? (
+          <Text className="text-principal text-sm font-nunito-semi text-center mt-2">Motivo: {trabajo.motivo_cancelacion}</Text>
+        ) : null}
+        {avisoPenalizacion ? (
+          <Text className="text-error text-xs font-nunito text-center mt-2 leading-4">{avisoPenalizacion}</Text>
+        ) : null}
         <Pressable
           onPress={() => router.replace('/buscar' as any)}
           className="bg-principal rounded-xl py-4 w-full items-center active:opacity-90 mt-8">
@@ -400,30 +432,48 @@ export default function TrabajoEnCursoScreen() {
             </Text>
           </Pressable>
 
-          {error ? (
+          {error && !confirmandoCancelar ? (
             <Text className="text-error text-[13px] font-nunito text-center mt-3">{error}</Text>
           ) : null}
 
-          {/* Bajarse del trabajo antes de empezarlo (cuenta como cancelación propia) */}
-          <Pressable
-            onPress={handleCancelar}
-            disabled={cancelando}
-            className={`rounded-xl py-3.5 items-center mt-6 border-[1.5px] border-error active:opacity-80 ${
-              confirmandoCancelar ? 'bg-error' : 'bg-white'
-            }`}>
-            <Text className={`text-sm font-nunito-bold ${confirmandoCancelar ? 'text-white' : 'text-error'}`}>
-              {cancelando
-                ? 'Cancelando…'
-                : confirmandoCancelar
-                ? 'Tocá de nuevo para cancelar'
-                : 'No puedo hacer este trabajo'}
-            </Text>
-          </Pressable>
+          {/* Bajarse del trabajo antes de empezarlo (cuenta como cancelación propia).
+              Sprint 6: con motivo, y avisando cuánto le pesa al puntaje. */}
           {confirmandoCancelar ? (
-            <Text className="text-neutro text-xs font-nunito text-center mt-2 leading-4">
-              Cancelar un trabajo que aceptaste baja tu score de reputación.
-            </Text>
-          ) : null}
+            <View className="bg-white border-[1.5px] border-error rounded-xl p-4 mt-6">
+              <Text className="text-principal text-base font-nunito-bold mb-1">¿Por qué no podés hacerlo?</Text>
+              <Text className="text-neutro text-xs font-nunito mb-3 leading-4">
+                Cancelar un trabajo que aceptaste baja tu puntaje (menos si lo hacés en el primer
+                minuto y medio, más si falta poco para el horario). Si cancelás seguido, no vas a
+                poder aceptar trabajos por 24 horas.
+              </Text>
+              <SelectorMotivo
+                motivos={motivos}
+                valor={motivo}
+                onCambiar={v => { setMotivo(v); setError(''); }}
+                detalle={detalle}
+                onDetalle={setDetalle}
+              />
+              {error ? <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text> : null}
+              <Pressable
+                onPress={handleCancelar}
+                disabled={cancelando}
+                className="bg-error rounded-xl py-3.5 items-center active:opacity-90 mb-2.5">
+                <Text className="text-white text-sm font-nunito-bold">{cancelando ? 'Cancelando…' : 'Cancelar el trabajo'}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setConfirmandoCancelar(false)}
+                disabled={cancelando}
+                className="bg-white rounded-xl py-3.5 items-center border-[1.5px] border-principal active:opacity-70">
+                <Text className="text-principal text-sm font-nunito-bold">Volver</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={abrirCancelar}
+              className="rounded-xl py-3.5 items-center mt-6 border-[1.5px] border-error bg-white active:opacity-80">
+              <Text className="text-sm font-nunito-bold text-error">No puedo hacer este trabajo</Text>
+            </Pressable>
+          )}
         </>
       ) : (
         <>

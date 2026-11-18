@@ -4,6 +4,7 @@ const {
   resumen, listarUsuarios, cambiarSuspension, cambiarVerificacion,
   listarTrabajos, listarTransacciones, listarWebhooks, reprocesarWebhook,
 } = require('../controllers/adminController')
+const { listarDisputasAdmin, obtenerDisputaAdmin, cambiarEstadoDisputa } = require('../controllers/disputasController')
 const { soloAdmin } = require('../middleware/admin')
 const { validar, validarIdParam } = require('../middleware/validar')
 const { limites } = require('../middleware/seguridad')
@@ -22,5 +23,9 @@ router.get('/trabajos',                    validar(esquemas.trabajosAdminQuery, 
 router.get('/transacciones',               validar(esquemas.transaccionesQuery, 'query'), listarTransacciones)
 router.get('/webhooks',                    validar(esquemas.webhooksQuery, 'query'), listarWebhooks)
 router.post('/webhooks/:id/reprocesar',    reprocesarWebhook)
+// Sprint 6 — disputas
+router.get('/disputas',                    validar(esquemas.disputasQuery, 'query'), listarDisputasAdmin)
+router.get('/disputas/:id',                obtenerDisputaAdmin)
+router.post('/disputas/:id/estado',        validar(esquemas.cambiarDisputa), cambiarEstadoDisputa)
 
 module.exports = router

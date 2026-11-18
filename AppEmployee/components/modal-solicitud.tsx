@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Paleta } from '@/constants/theme';
-import { SEGUNDOS_LIMITE_POR_DEFECTO, montoTrabajador, segundosParaResponder, type Trabajo } from '../lib/trabajos';
+import {
+  SEGUNDOS_LIMITE_POR_DEFECTO,
+  formatearProgramacion,
+  montoTrabajador,
+  segundosParaResponder,
+  type Trabajo,
+} from '../lib/trabajos';
 import { distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
 
 type Props = {
@@ -96,6 +102,33 @@ export default function ModalSolicitud({ trabajo, miUbicacion, onAceptar, onRech
                 <MaterialIcons name="place" size={18} color={Paleta.principal} />
                 <Text className="flex-1 text-principal text-sm font-nunito ml-2">
                   A {formatearDistancia(distancia)} de tu ubicación
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Sprint 6: si es programado, a qué hora es (se publica una hora antes) */}
+            {trabajo.programado_para ? (
+              <View className="flex-row items-start mb-4">
+                <MaterialIcons name="event" size={18} color={Paleta.principal} />
+                <Text className="flex-1 text-principal text-sm font-nunito-semi ml-2">
+                  Programado para el {formatearProgramacion(trabajo.programado_para)}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Sprint 6: puntaje del empleador (5 de base; lo bajan sus cancelaciones) */}
+            {trabajo.empleador?.reputacion ? (
+              <View className="flex-row items-start mb-4">
+                <MaterialIcons
+                  name="verified-user"
+                  size={18}
+                  color={trabajo.empleador.reputacion.score >= 4 ? Paleta.exito : Paleta.error}
+                />
+                <Text className="flex-1 text-principal text-sm font-nunito ml-2">
+                  Empleador {trabajo.empleador.reputacion.score.toFixed(1).replace('.', ',')}/5
+                  {trabajo.empleador.reputacion.cancelaciones
+                    ? ` · ${trabajo.empleador.reputacion.cancelaciones} cancelación${trabajo.empleador.reputacion.cancelaciones === 1 ? '' : 'es'}`
+                    : ' · sin cancelaciones'}
                 </Text>
               </View>
             ) : null}

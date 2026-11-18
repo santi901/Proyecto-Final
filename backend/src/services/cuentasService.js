@@ -6,8 +6,9 @@ const supabase = require('../config/supabase')
 // Si en una base las columnas no existen, todo esto se comporta como "nadie está
 // suspendido" en vez de romper el login o el matching: se avisa una vez por consola.
 
-// Errores de PostgREST/Postgres cuando una columna no existe.
-const CODIGOS_COLUMNA_INEXISTENTE = ['42703', 'PGRST204']
+// Errores de PostgREST/Postgres cuando una columna (42703, PGRST204) o una tabla
+// (42P01, PGRST205 — Sprint 6: cancelaciones, disputas) no existe.
+const CODIGOS_COLUMNA_INEXISTENTE = ['42703', 'PGRST204', '42P01', 'PGRST205']
 
 function faltaMigracion(error) {
   return CODIGOS_COLUMNA_INEXISTENTE.includes(error?.code)

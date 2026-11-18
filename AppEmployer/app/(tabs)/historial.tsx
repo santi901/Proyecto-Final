@@ -20,6 +20,7 @@ import { Paleta } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
   pago_pendiente: 'Falta pagar',
+  programado: 'Programado',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -29,6 +30,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
   pago_pendiente: { fondo: 'bg-fondo-suave border border-error', texto: 'text-error' },
+  programado: { fondo: 'bg-white border border-principal', texto: 'text-principal' },
   pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },

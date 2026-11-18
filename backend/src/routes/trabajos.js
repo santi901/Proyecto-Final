@@ -5,7 +5,9 @@ const {
   cotizarTrabajo, crearTrabajo, obtenerEstadoPago, simularPago, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
   cancelarTrabajo, obtenerCandidatos, obtenerCalificacion, historialTrabajos,
+  motivosCancelacion,
 } = require('../controllers/trabajosController')
+const { crearDisputa } = require('../controllers/disputasController')
 const { enviarMensaje, listarMensajes } = require('../controllers/mensajesController')
 const { subirEvidencia, listarEvidencia } = require('../controllers/evidenciaController')
 const { obtenerUbicacionTrabajador } = require('../controllers/ubicacionController')
@@ -19,10 +21,23 @@ router.param('id', validarIdParam)
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
+// Sprint 6 — foto opcional de una disputa. Un error de multer (ej. más de 10 MB) vuelve
+// como 400 con mensaje claro en vez de caer en el errorHandler como 500.
+const fotoDisputa = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 5 } })
+  .single('foto')
+function recibirFotoDisputa(req, res, next) {
+  fotoDisputa(req, res, (error) => {
+    if (!error) return next()
+    console.error(`Foto de disputa rechazada: ${error.code ?? ''} ${error.message}`)
+    res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'La foto puede pesar hasta 10 MB.' : 'No pudimos leer la foto enviada.' })
+  })
+}
+
 router.get('/',                     autenticar, listarTrabajos)
 router.get('/historial',            autenticar, historialTrabajos)
 router.get('/mios',                 autenticar, misTrabajos)
 router.get('/programados',          autenticar, validar(esquemas.programadosQuery, 'query'), listarProgramados)
+router.get('/motivos-cancelacion',  autenticar, motivosCancelacion)
 router.post('/cotizar',             autenticar, soloEmpleador, limites.cotizar, validar(esquemas.cotizar), cotizarTrabajo)
 router.get('/:id',                  autenticar, obtenerTrabajo)
 router.get('/:id/pago',             autenticar, soloEmpleador, obtenerEstadoPago)
@@ -40,6 +55,7 @@ router.post('/:id/mensajes',        autenticar, validar(esquemas.mensaje), envia
 router.get('/:id/mensajes',         autenticar, listarMensajes)
 router.post('/:id/evidencia',       autenticar, soloEmpleado,  upload.single('foto'), subirEvidencia)
 router.get('/:id/evidencia',        autenticar, listarEvidencia)
+router.post('/:id/disputas',        autenticar, recibirFotoDisputa, crearDisputa)
 router.get('/:id/ubicacion-trabajador', autenticar, soloEmpleador, obtenerUbicacionTrabajador)
 
 module.exports = router

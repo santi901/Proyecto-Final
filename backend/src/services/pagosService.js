@@ -2,6 +2,8 @@ const crypto = require('crypto')
 const supabase = require('../config/supabase')
 const mp = require('./mercadoPagoService')
 const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('./notificacionesService')
+const { faltaMigracion } = require('./cuentasService')
+const { estadoAlPublicar } = require('../utils/programacion')
 
 // Modelo de custodia: el empleador le paga a la cuenta de MP de la plataforma y
 // la plata queda RETENIDA ahí (pagos.estado = 'aprobado') hasta que:
@@ -14,6 +16,17 @@ const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require
 // puedan correr a la vez sin publicar el trabajo ni reembolsar dos veces.
 
 const MINUTOS_SOLICITUD = 15
+
+// trabajos.programado_para, o null si no tiene (o si la columna no existe en la base:
+// mismo criterio tolerante que el resto de las columnas del Sprint 6).
+async function leerProgramadoPara(trabajoId) {
+  const { data, error } = await supabase.from('trabajos').select('programado_para').eq('id', trabajoId).maybeSingle()
+  if (error) {
+    if (!faltaMigracion(error)) console.error(`Error leyendo programado_para (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return null
+  }
+  return data?.programado_para ?? null
+}
 
 async function obtenerPagoDeTrabajo(trabajoId) {
   const { data } = await supabase.from('pagos').select('*').eq('trabajo_id', trabajoId).maybeSingle()
@@ -89,19 +102,50 @@ async function procesarPagoMp(pagoMp) {
 
   if (!aprobado?.length) return  // ya lo procesó otro webhook / sincronización
 
-  const solicitudExpira = new Date(Date.now() + MINUTOS_SOLICITUD * 60 * 1000)
-  const { data: publicados } = await supabase
+  // Sprint 6: un trabajo programado para más adelante NO se publica todavía: queda en
+  // 'programado' (pagado, esperando su fecha) y lo publica jobs/activarProgramados.js
+  // una hora antes. Si no, el poller de reasignación lo cancelaría por falta de
+  // candidatos mucho antes de la fecha.
+  const programadoPara = await leerProgramadoPara(trabajoId)
+  let estadoNuevo = estadoAlPublicar(programadoPara)
+
+  const publicar = (estado) => supabase
     .from('trabajos')
-    .update({ estado: 'pendiente', solicitud_expira_en: solicitudExpira.toISOString() })
+    .update(estado === 'programado'
+      ? { estado: 'programado' }
+      : { estado: 'pendiente', solicitud_expira_en: new Date(Date.now() + MINUTOS_SOLICITUD * 60 * 1000).toISOString() })
     .eq('id', trabajoId)
     .eq('estado', 'pago_pendiente')
     .select('id, titulo, categoria, empleador_id')
+
+  let { data: publicados, error: errorPublicar } = await publicar(estadoNuevo)
+
+  // 23514 = la base todavía tiene el CHECK de estado sin 'programado' (no se corrió la
+  // migración del Sprint 6): se publica como antes, en vez de tomarlo como cancelado.
+  if (errorPublicar?.code === '23514' && estadoNuevo === 'programado') {
+    console.error(`La base no acepta el estado 'programado' (falta la migración del Sprint 6): el trabajo ${trabajoId} se publica ya.`)
+    estadoNuevo = 'pendiente';
+    ({ data: publicados, error: errorPublicar } = await publicar(estadoNuevo))
+  }
+  // Cualquier otro error sigue el camino de siempre (abajo: sin fila → reembolso completo),
+  // para no dejar un pago aprobado colgado en un trabajo que nunca se publica.
+  if (errorPublicar) console.error(`Error publicando trabajo pagado (trabajoId=${trabajoId}): ${errorPublicar.message ?? errorPublicar}`)
 
   const trabajo = publicados?.[0]
   if (!trabajo) {
     // El trabajo se canceló (o expiró) antes de que se acreditara el pago: se devuelve todo.
     console.error(`Pago acreditado para un trabajo que ya no espera pago (trabajoId=${trabajoId}): se reembolsa completo.`)
     await reembolsarTrabajo({ trabajoId, porcentaje: 100 })
+    return
+  }
+
+  if (estadoNuevo === 'programado') {
+    notificarEmpleador(trabajo.empleador_id, {
+      tipo:    'pago',
+      titulo:  'Pago acreditado',
+      mensaje: `Recibimos tu pago. Vamos a empezar a buscar a alguien para "${trabajo.titulo}" una hora antes de la fecha que elegiste.`,
+      trabajoId,
+    })
     return
   }
 
@@ -259,4 +303,5 @@ async function liberarPago({ trabajoId, empleadoId, montoTrabajador }) {
 module.exports = {
   obtenerPagoDeTrabajo, iniciarCobro, procesarPagoMp, sincronizarPago, simularPagoAprobado,
   cancelarPagoPendiente, reembolsarTrabajo, crearLiquidacion, liberarPago, montoAReembolsar,
+  MINUTOS_SOLICITUD,
 }

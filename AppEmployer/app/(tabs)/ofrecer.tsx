@@ -39,7 +39,7 @@ import {
   HORAS_PROGRAMABLES,
   formatearProgramacion,
   guardarProgramacion,
-  lineaProgramacion,
+  programadoValido,
   proximosDias,
 } from '../../lib/programados';
 import { formatearFecha, formatearMonto, obtenerHistorial, type TrabajoHistorial } from '../../lib/historial';
@@ -50,6 +50,7 @@ type Pestana = 'crear' | 'historial' | 'favoritos';
 
 const ESTADO_CORTO: Record<string, string> = {
   pago_pendiente: 'Falta pagar',
+  programado: 'Programado',
   pendiente: 'Buscando',
   asignado: 'Asignado',
   en_progreso: 'En curso',
@@ -142,11 +143,15 @@ export default function OfrecerTrabajoScreen() {
   // Si se tocan dos opciones seguidas, solo cuenta la respuesta de la última.
   const ultimaCotizacion = useRef(0);
 
-  async function pedirCotizacion(cat = categoria, dif = dificultad) {
+  // Sprint 6: la fecha programada va en la cotización (el recargo por horario se calcula
+  // con esa fecha y queda firmada en el token): cambiar la fecha obliga a recotizar.
+  async function pedirCotizacion(cat = categoria, dif = dificultad, fecha = fechaProgramada()) {
     setCotizacion(null);
     setCotizacionToken(null);
     setErrorCotizacion('');
     if (cat === null || !dif || !coords) return;
+    // Programado sin hora elegida todavía: no se cotiza hasta que la elija.
+    if (programarRef.current && !fecha) return;
 
     const pedido = ++ultimaCotizacion.current;
     setCotizando(true);
@@ -156,6 +161,7 @@ export default function OfrecerTrabajoScreen() {
         nivelDificultad: dif,
         latitud: coords.lat,
         longitud: coords.lng,
+        programadoPara: fecha ? fecha.toISOString() : null,
       });
       if (pedido !== ultimaCotizacion.current) return;
       setCotizacion(r.cotizacion);
@@ -253,12 +259,31 @@ export default function OfrecerTrabajoScreen() {
   const [horaProgramada, setHoraProgramada] = useState<number | null>(null);
   // Se calcula una vez (no en cada render): leer el reloj en el render no es puro.
   const [dias] = useState(proximosDias);
+  // pedirCotizacion se llama justo después de cambiar estos valores, antes del re-render:
+  // por eso el "¿programar?" se lee de una ref y la fecha se le pasa ya calculada.
+  const programarRef = useRef(false);
+
+  function fechaDe(prog: boolean, dia: number, hora: number | null): Date | null {
+    if (!prog || hora === null) return null;
+    const d = new Date(dias[dia]);
+    d.setHours(hora, 0, 0, 0);
+    return d;
+  }
 
   function fechaProgramada(): Date | null {
-    if (!programar || horaProgramada === null) return null;
-    const d = new Date(dias[diaProgramado]);
-    d.setHours(horaProgramada, 0, 0, 0);
-    return d;
+    return fechaDe(programar, diaProgramado, horaProgramada);
+  }
+
+  // Cada cambio de la programación vuelve a cotizar con la fecha nueva.
+  function cambiarProgramacion(cambios: { programar?: boolean; dia?: number; hora?: number | null }) {
+    const prog = cambios.programar ?? programar;
+    const dia  = cambios.dia ?? diaProgramado;
+    const hora = cambios.hora !== undefined ? cambios.hora : horaProgramada;
+    setProgramar(prog);
+    setDiaProgramado(dia);
+    setHoraProgramada(hora);
+    programarRef.current = prog;
+    pedirCotizacion(categoria, dificultad, fechaDe(prog, dia, hora));
   }
 
   // ----- Publicación del trabajo -----
@@ -282,8 +307,9 @@ export default function OfrecerTrabajoScreen() {
     if (!coords) { setErrorPublicar('No pudimos obtener tu ubicación. Reintentá desde el mapa.'); return; }
     const programado = fechaProgramada();
     if (programar && !programado) { setErrorPublicar('Elegí el día y la hora del trabajo programado.'); return; }
-    if (programado && programado.getTime() < Date.now() + 30 * 60_000) {
-      setErrorPublicar('El trabajo programado tiene que ser al menos dentro de 30 minutos.');
+    // El backend pide al menos 60 min (lo publica una hora antes); 5 de margen por la demora.
+    if (programado && !programadoValido(programado)) {
+      setErrorPublicar('El trabajo programado tiene que ser al menos dentro de una hora. Elegí otro horario.');
       return;
     }
     if (!cotizacionToken || precio === null) {
@@ -301,16 +327,17 @@ export default function OfrecerTrabajoScreen() {
 
     setPublicando(true);
     try {
-      // La fecha programada viaja en la descripción (el backend todavía no tiene el campo):
-      // así el trabajador la ve antes de aceptar. Ver lib/programados.ts.
-      const textoProgramado = programado ? lineaProgramacion(programado) : '';
+      // La fecha programada ya viaja dentro del cotizacionToken (Sprint 6): el backend la
+      // guarda en programado_para y publica el trabajo una hora antes. Ya no hace falta
+      // meterla en la descripción.
       const { trabajo, pin, pago } = await crearTrabajo({
         titulo: titulo.trim(),
-        descripcion: (descripcion.trim().slice(0, 1000 - textoProgramado.length) + textoProgramado),
+        descripcion: descripcion.trim(),
         cotizacionToken,
       });
 
       await guardarPinLocal(trabajo.id, pin);
+      // Copia local para la lista de "Mis trabajos" (lib/programados.ts).
       if (programado) await guardarProgramacion(trabajo.id, programado);
 
       setTitulo('Nuevo Trabajo');
@@ -320,6 +347,7 @@ export default function OfrecerTrabajoScreen() {
       setCotizacion(null);
       setCotizacionToken(null);
       setProgramar(false);
+      programarRef.current = false;
       setHoraProgramada(null);
       setAvisoFavorito('');
 
@@ -664,7 +692,7 @@ export default function OfrecerTrabajoScreen() {
               {[false, true].map(p => (
                 <Pressable
                   key={String(p)}
-                  onPress={() => setProgramar(p)}
+                  onPress={() => cambiarProgramacion({ programar: p })}
                   className={`flex-1 flex-row items-center justify-center py-3 active:opacity-70 ${programar === p ? 'bg-acento' : 'bg-white'}`}>
                   <MaterialIcons name={p ? 'event' : 'bolt'} size={16} color={Paleta.principal} />
                   <Text className="text-[13px] font-nunito-semi text-principal ml-1">{p ? 'Programar' : 'Lo antes posible'}</Text>
@@ -680,7 +708,7 @@ export default function OfrecerTrabajoScreen() {
                   return (
                     <Pressable
                       key={d.toISOString()}
-                      onPress={() => setDiaProgramado(i)}
+                      onPress={() => cambiarProgramacion({ dia: i })}
                       style={sel ? undefined : sombra(Paleta.neutro, 0.5)}
                       className={`w-14 py-2 rounded-xl items-center ${sel ? 'bg-principal' : 'bg-white'}`}>
                       <Text className={`text-[11px] font-nunito ${sel ? 'text-acento' : 'text-neutro'}`}>
@@ -697,7 +725,7 @@ export default function OfrecerTrabajoScreen() {
                   return (
                     <Pressable
                       key={h}
-                      onPress={() => setHoraProgramada(h)}
+                      onPress={() => cambiarProgramacion({ hora: h })}
                       style={sel ? undefined : sombra(Paleta.neutro, 0.5)}
                       className={`px-3 py-2 rounded-full ${sel ? 'bg-acento' : 'bg-white'}`}>
                       <Text className="text-[13px] font-nunito-semi text-principal">{String(h).padStart(2, '0')}:00</Text>
@@ -707,7 +735,7 @@ export default function OfrecerTrabajoScreen() {
               </ScrollView>
               <Text className="text-[12px] font-nunito text-neutro mt-1">
                 {fechaProgramada()
-                  ? `Se publica ahora para el ${formatearProgramacion(fechaProgramada()!)}. El trabajador ve la fecha antes de aceptar.`
+                  ? `Para el ${formatearProgramacion(fechaProgramada()!)}. Lo pagás ahora y se lo mostramos a los trabajadores una hora antes.`
                   : 'Elegí el día y la hora.'}
               </Text>
             </View>

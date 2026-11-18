@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Trabajos programados (Sprint 6): el empleador puede publicar un trabajo para una fecha
-// y hora futuras. El backend todavía no tiene una columna para eso (`trabajos.fecha_programada`
-// queda pendiente del lado de back), así que:
-//   · la fecha viaja dentro de la descripción ("📅 Programado para …"), para que el
-//     trabajador la vea antes de aceptar;
-//   · y se guarda en el dispositivo por trabajo, para armar la sección "Próximos trabajos".
+// y hora futuras. La fecha viaja en la cotización (POST /api/trabajos/cotizar
+// { programadoPara }) y el backend la guarda en trabajos.programado_para: con el pago
+// acreditado el trabajo queda 'programado' y se publica solo una hora antes.
+// Además se guarda una copia en el dispositivo por trabajo, para la sección "Próximos
+// trabajos" (el listado del backend no trae la fecha).
 
 const PREFIJO = 'cg_programado_';
 export const MARCA_PROGRAMADO = '📅 Programado para';
@@ -34,9 +34,17 @@ export function formatearProgramacion(fecha: Date | string): string {
   return `${DIAS[d.getDay()]} ${dd}/${mm} a las ${hh}:${mi}`;
 }
 
-/** Texto que se agrega al final de la descripción del trabajo. */
+/** Texto que se agregaba al final de la descripción (trabajos viejos lo pueden tener). */
 export function lineaProgramacion(fecha: Date): string {
   return `\n\n${MARCA_PROGRAMADO} el ${formatearProgramacion(fecha)}.`;
+}
+
+/**
+ * El backend pide al menos 60 min de anticipación (publica el trabajo una hora antes);
+ * se dejan 5 de margen por lo que tarda en crearse. Afuera del componente porque lee el reloj.
+ */
+export function programadoValido(fecha: Date): boolean {
+  return fecha.getTime() >= Date.now() + 65 * 60_000;
 }
 
 /** Próximos 7 días (hoy incluido), a medianoche. */
