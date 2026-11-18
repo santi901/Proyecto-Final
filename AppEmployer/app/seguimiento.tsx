@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Pressable,
@@ -11,14 +11,11 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapaSeguimiento from '../components/mapa-seguimiento';
-import CalificacionEstrellas from '../components/calificacion-estrellas';
 import {
   obtenerTrabajo,
   completarTrabajo,
   cancelarTrabajo,
   obtenerPinLocal,
-  calificarTrabajo,
-  marcarCalificadoLocal,
   yaCalificadoLocal,
   formatearDuracion,
   type Trabajo,
@@ -76,18 +73,18 @@ export default function SeguimientoScreen() {
   // Última posición conocida del trabajador, para verlo moverse en el mapa.
   const [ubicTrabajador, setUbicTrabajador] = useState<Coordenadas | null>(null);
 
-  const [puntaje, setPuntaje] = useState(0);
-  const [comentario, setComentario] = useState('');
-  const [calificando, setCalificando] = useState(false);
   const [calificado, setCalificado] = useState(false);
-  const [errorCalificacion, setErrorCalificacion] = useState('');
 
   // ----- Datos guardados en este dispositivo: el PIN y si ya se calificó -----
   useEffect(() => {
     if (!trabajoId) return;
     obtenerPinLocal(trabajoId).then(setPinDelTrabajo);
-    yaCalificadoLocal(trabajoId).then(setCalificado);
   }, [trabajoId]);
+
+  // Se relee al volver de /calificar.
+  useFocusEffect(useCallback(() => {
+    if (trabajoId) yaCalificadoLocal(trabajoId).then(setCalificado);
+  }, [trabajoId]));
 
   // Si el backend de fotos no responde, se muestra como "todavía no hay foto" sin romper la pantalla.
   async function cargarEvidencia() {
@@ -264,29 +261,23 @@ export default function SeguimientoScreen() {
     }
   }
 
-  async function handleCalificar() {
-    setErrorCalificacion('');
-    if (puntaje < 1) { setErrorCalificacion('Elegí de 1 a 5 estrellas.'); return; }
-
-    setCalificando(true);
-    try {
-      await calificarTrabajo(trabajoId!, puntaje, comentario.trim() || undefined);
-      await marcarCalificadoLocal(trabajoId!);
-      setCalificado(true);
-    } catch (e: any) {
-      // 409 = el backend ya tenía una calificación para este trabajo (se calificó desde
-      // otro dispositivo, o se reinstaló la app). No es un error: hay que dejar la
-      // pantalla en "ya calificado" en vez de pedirlo de nuevo para siempre.
-      if (e?.status === 409) {
-        await marcarCalificadoLocal(trabajoId!);
-        setCalificado(true);
-      } else {
-        setErrorCalificacion(e?.message ?? 'No pudimos enviar la calificación.');
-      }
-    } finally {
-      setCalificando(false);
-    }
+  function abrirCalificacion() {
+    router.push({ pathname: '/calificar', params: { trabajoId } } as any);
   }
+
+  function abrirReporte() {
+    router.push({ pathname: '/reportar-problema', params: { trabajoId, titulo: trabajo?.titulo ?? '' } } as any);
+  }
+
+  // Al cerrarse el trabajo (confirmaron las dos partes) se abre sola la pantalla de
+  // calificación, una única vez por visita, si todavía no se calificó.
+  const calificacionOfrecida = useRef(false);
+  useEffect(() => {
+    if (trabajo?.estado !== 'completado' || calificacionOfrecida.current) return;
+    calificacionOfrecida.current = true;
+    yaCalificadoLocal(trabajoId!).then(ya => { if (!ya) abrirCalificacion(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trabajo?.estado]);
 
   if (cargando) {
     return (
@@ -353,7 +344,7 @@ export default function SeguimientoScreen() {
           </View>
         </View>
 
-        {/* Calificación del trabajador */}
+        {/* Calificación del trabajador: se hace en su propia pantalla (/calificar) */}
         <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4 mb-6">
           {calificado ? (
             <View className="items-center py-2">
@@ -369,36 +360,11 @@ export default function SeguimientoScreen() {
               <Text className="text-neutro text-xs font-nunito text-center mb-3">
                 Calificá al trabajador de 1 a 5 estrellas.
               </Text>
-
-              <CalificacionEstrellas
-                valor={puntaje}
-                onCambiar={v => { setPuntaje(v); setErrorCalificacion(''); }}
-              />
-
-              <TextInput
-                className="bg-fondo-suave rounded-[10px] px-4 py-3 mt-4 mb-3 text-[15px] font-nunito text-principal h-20"
-                style={[{ textAlignVertical: 'top' }, sombra(Paleta.acento)]}
-                placeholder="Comentario (opcional)"
-                placeholderTextColor={Paleta.neutro}
-                value={comentario}
-                onChangeText={setComentario}
-                multiline
-                maxLength={300}
-              />
-
-              {errorCalificacion ? (
-                <Text className="text-error text-[13px] font-nunito text-center mb-2">{errorCalificacion}</Text>
-              ) : null}
-
               <Pressable
-                onPress={handleCalificar}
-                disabled={calificando}
-                className="bg-principal rounded-xl py-3.5 items-center active:opacity-90">
-                {calificando ? (
-                  <ActivityIndicator color={Paleta.blanco} />
-                ) : (
-                  <Text className="text-acento text-base font-nunito-bold">Enviar calificación</Text>
-                )}
+                onPress={abrirCalificacion}
+                className="bg-principal rounded-xl py-3.5 flex-row items-center justify-center active:opacity-90">
+                <MaterialIcons name="star" size={20} color={Paleta.acento} />
+                <Text className="text-acento text-base font-nunito-bold ml-2">Calificar al trabajador</Text>
               </Pressable>
             </>
           )}
@@ -409,6 +375,11 @@ export default function SeguimientoScreen() {
           style={sombra(Paleta.principal, 0.75)}
           className="bg-white rounded-xl py-3.5 items-center active:opacity-70 mb-3">
           <Text className="text-principal text-base font-nunito-bold">Ver el chat</Text>
+        </Pressable>
+
+        <Pressable onPress={abrirReporte} className="flex-row items-center justify-center py-3 mb-2 active:opacity-70">
+          <MaterialIcons name="report-problem" size={18} color={Paleta.error} />
+          <Text className="text-error text-sm font-nunito-semi ml-1.5">Reportar problema</Text>
         </Pressable>
 
         <Pressable
@@ -722,6 +693,14 @@ export default function SeguimientoScreen() {
               <Text className="text-error text-sm font-nunito-semi underline">Cancelar trabajo</Text>
             </Pressable>
           )
+        ) : null}
+
+        {/* Disputas: una vez que hay un trabajador involucrado */}
+        {trabajo.estado === 'asignado' || enProgreso || (cancelado && trabajo.cancelado_por === 'empleado') ? (
+          <Pressable onPress={abrirReporte} className="flex-row items-center justify-center py-3 mt-2 active:opacity-70">
+            <MaterialIcons name="report-problem" size={18} color={Paleta.error} />
+            <Text className="text-error text-sm font-nunito-semi ml-1.5">Reportar problema</Text>
+          </Pressable>
         ) : null}
 
         {cancelado ? (

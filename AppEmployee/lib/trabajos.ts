@@ -18,6 +18,8 @@ export type Trabajo = {
   /** Lo que paga el empleador. El trabajador cobra `monto_trabajador` (precio - comisión). */
   precio: number;
   comision_porcentaje: number | null;
+  /** Lo que se queda la plataforma: precio - monto_trabajador. */
+  comision_monto: number | null;
   /** null en trabajos creados antes de que existiera el cobro con MercadoPago. */
   monto_trabajador: number | null;
   estado: EstadoTrabajo;
