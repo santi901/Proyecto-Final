@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario } from '../../auth';
-import { formatearDuracion, type EstadoTrabajo } from '../../lib/trabajos';
+import { formatearDuracion, formatearFechaHora, type EstadoTrabajo } from '../../lib/trabajos';
 import {
   formatearFecha,
   formatearMonto,
@@ -19,6 +19,7 @@ import { Paleta } from '@/constants/theme';
 // pantalla en las dos apps: el trabajador ve lo que cobró; el empleador, lo que pagó.
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
+  programado: 'Programado',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -27,6 +28,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 };
 
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string }> = {
+  programado: { fondo: 'bg-white border border-principal', texto: 'text-principal' },
   pendiente: { fondo: 'bg-fondo-suave border border-neutro', texto: 'text-neutro' },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
@@ -171,7 +173,16 @@ export default function HistorialScreen() {
               </View>
 
               {t.estado === 'cancelado' && t.cancelado_por ? (
-                <Text className="text-error text-xs font-nunito mt-2">{QUIEN_CANCELO[t.cancelado_por] ?? 'Cancelado'}</Text>
+                <Text className="text-error text-xs font-nunito mt-2">
+                  {QUIEN_CANCELO[t.cancelado_por] ?? 'Cancelado'}
+                  {t.motivo_cancelacion ? ` · ${t.motivo_cancelacion}` : ''}
+                </Text>
+              ) : null}
+
+              {t.estado === 'programado' && t.fecha_programada ? (
+                <Text className="text-principal text-xs font-nunito-semi mt-2">
+                  Programado para el {formatearFechaHora(t.fecha_programada)}
+                </Text>
               ) : null}
 
               {t.calificacion ? (

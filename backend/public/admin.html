@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ChanguitApp · Panel de disputas</title>
+<style>
+  :root { --principal:#1f3b2d; --acento:#f5c542; --fondo:#fffdf3; --neutro:#8a8a7a; --error:#c0392b; --exito:#2e8b57; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--fondo); color:var(--principal); }
+  header { background:var(--principal); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:18px; margin:0; }
+  main { display:grid; grid-template-columns: 380px 1fr; gap:16px; padding:16px 24px; }
+  .card { background:#fff; border:1px solid #e3e0cf; border-radius:12px; padding:14px; }
+  .lista { max-height: calc(100vh - 140px); overflow:auto; }
+  .item { padding:10px; border-radius:8px; cursor:pointer; border:1px solid transparent; margin-bottom:6px; }
+  .item:hover { background:#f7f4e6; }
+  .item.sel { border-color:var(--principal); background:#f7f4e6; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:700; }
+  .abierta { background:var(--acento); } .en_revision { background:#cfe3ff; }
+  .resuelta { background:var(--exito); color:#fff; } .rechazada { background:var(--error); color:#fff; }
+  .muted { color:var(--neutro); font-size:13px; }
+  img { max-width:100%; border-radius:8px; margin-top:6px; }
+  textarea { width:100%; min-height:80px; border-radius:8px; border:1px solid #ccc; padding:8px; font:inherit; }
+  button { background:var(--principal); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-weight:700; margin-right:6px; }
+  button.sec { background:#fff; color:var(--principal); border:1px solid var(--principal); }
+  button.peligro { background:var(--error); }
+  select, input { padding:6px 8px; border-radius:8px; border:1px solid #ccc; font:inherit; }
+  .chat { max-height:240px; overflow:auto; font-size:13px; }
+  .chat p { margin:4px 0; }
+  .error { color:var(--error); }
+  #login { max-width:380px; margin:80px auto; }
+  h2 { font-size:16px; margin:16px 0 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ChanguitApp · Disputas</h1>
+  <span id="cerrar" hidden><button class="sec" onclick="salir()">Salir</button></span>
+</header>
+
+<div id="login" class="card">
+  <h2>Ingresá la clave de admin</h2>
+  <p class="muted">Es la ADMIN_API_KEY del .env del backend.</p>
+  <input id="clave" type="password" style="width:100%" autocomplete="off">
+  <p><button onclick="entrar()">Entrar</button></p>
+  <p id="errorLogin" class="error"></p>
+</div>
+
+<main id="panel" hidden>
+  <section class="card">
+    <label class="muted">Estado:
+      <select id="filtro" onchange="cargarLista()">
+        <option value="abierta">Abiertas</option>
+        <option value="en_revision">En revisión</option>
+        <option value="resuelta">Resueltas</option>
+        <option value="rechazada">Rechazadas</option>
+        <option value="">Todas</option>
+      </select>
+    </label>
+    <button class="sec" onclick="cargarLista()">Recargar</button>
+    <div id="lista" class="lista" style="margin-top:10px"></div>
+  </section>
+  <section class="card" id="detalle"><p class="muted">Elegí una disputa de la lista.</p></section>
+</main>
+
+<script>
+// Todo el contenido que viene de usuarios se pone con textContent (nunca innerHTML):
+// la descripción de una disputa la escribe cualquiera, no puede inyectar HTML/JS acá.
+const ETIQUETAS = { abierta: 'Abierta', en_revision: 'En revisión', resuelta: 'Resuelta', rechazada: 'Rechazada' };
+let clave = sessionStorage.getItem('adminKey') || '';
+let seleccionada = null;
+
+function el(tag, props = {}, ...hijos) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'className') n.className = v; else if (k === 'onclick') n.onclick = v; else n.setAttribute(k, v);
+  }
+  for (const h of hijos) if (h != null) n.append(h instanceof Node ? h : document.createTextNode(String(h)));
+  return n;
+}
+const fecha = iso => iso ? new Date(iso).toLocaleString('es-AR') : '—';
+
+async function api(path, opciones = {}) {
+  const res = await fetch(path, { ...opciones, headers: { 'Content-Type': 'application/json', 'x-admin-key': clave, ...(opciones.headers || {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { salir(); throw new Error('Clave inválida'); }
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data;
+}
+
+async function entrar() {
+  clave = document.getElementById('clave').value.trim();
+  try {
+    await api('/api/admin/disputas?estado=abierta');
+    sessionStorage.setItem('adminKey', clave);
+    mostrarPanel();
+  } catch (e) { document.getElementById('errorLogin').textContent = e.message; }
+}
+function salir() {
+  sessionStorage.removeItem('adminKey'); clave = '';
+  document.getElementById('panel').hidden = true; document.getElementById('cerrar').hidden = true;
+  document.getElementById('login').hidden = false;
+}
+function mostrarPanel() {
+  document.getElementById('login').hidden = true;
+  document.getElementById('panel').hidden = false; document.getElementById('cerrar').hidden = false;
+  cargarLista();
+}
+
+async function cargarLista() {
+  const lista = document.getElementById('lista');
+  lista.replaceChildren(el('p', { className: 'muted' }, 'Cargando…'));
+  try {
+    const estado = document.getElementById('filtro').value;
+    const { disputas } = await api('/api/admin/disputas' + (estado ? `?estado=${estado}` : ''));
+    lista.replaceChildren(...(disputas.length ? disputas.map(d => el('div', {
+      className: 'item' + (d.id === seleccionada ? ' sel' : ''), onclick: () => abrir(d.id),
+    },
+      el('span', { className: `chip ${d.estado}` }, ETIQUETAS[d.estado]), ' ',
+      el('strong', {}, d.trabajo?.titulo ?? 'Trabajo'),
+      el('div', { className: 'muted' }, `${d.motivoTexto} · por ${d.rol_reportante} · ${fecha(d.creado_en)}`),
+    )) : [el('p', { className: 'muted' }, 'No hay disputas con ese estado.')]));
+  } catch (e) { lista.replaceChildren(el('p', { className: 'error' }, e.message)); }
+}
+
+async function abrir(id) {
+  seleccionada = id;
+  const det = document.getElementById('detalle');
+  det.replaceChildren(el('p', { className: 'muted' }, 'Cargando…'));
+  try {
+    const { disputa: d, trabajo: t, evidencias, mensajes } = await api(`/api/admin/disputas/${id}`);
+    const partes = [
+      el('span', { className: `chip ${d.estado}` }, ETIQUETAS[d.estado]),
+      el('h2', {}, d.motivoTexto),
+      el('p', { className: 'muted' }, `Reportó: ${d.rol_reportante} (usuario ${d.reportado_por}) · ${fecha(d.creado_en)}`),
+      el('p', {}, d.descripcion),
+      d.fotoUrl ? el('img', { src: d.fotoUrl, alt: 'Foto de la disputa' }) : el('p', { className: 'muted' }, 'Sin foto.'),
+    ];
+    if (t) partes.push(
+      el('h2', {}, 'Trabajo'),
+      el('p', {}, `${t.titulo} · ${t.categoria} · ${t.nivel_dificultad ?? ''} · $${t.precio} · estado ${t.estado}`),
+      el('p', { className: 'muted' }, t.descripcion),
+      el('p', { className: 'muted' }, `Creado ${fecha(t.creado_en)} · programado ${fecha(t.fecha_programada)} · inicio ${fecha(t.iniciado_en)} · fin ${fecha(t.finalizado_en)}`),
+      t.cancelado_por ? el('p', { className: 'muted' }, `Cancelado por ${t.cancelado_por}: ${t.motivo_cancelacion ?? ''}`) : null,
+    );
+    partes.push(el('h2', {}, `Evidencia del trabajador (${evidencias.length})`),
+      ...evidencias.map(e => el('img', { src: e.url, alt: 'Evidencia' })));
+    partes.push(el('h2', {}, `Chat (${mensajes.length})`),
+      el('div', { className: 'chat' }, ...mensajes.map(m => el('p', {}, el('strong', {}, `${m.remitente_tipo}: `), m.mensaje, el('span', { className: 'muted' }, ` · ${fecha(m.enviado_en)}`)))));
+
+    if (d.estado === 'abierta' || d.estado === 'en_revision') {
+      const texto = el('textarea', { placeholder: 'Resolución (la ve quien reportó)', maxlength: '1000' });
+      const err = el('p', { className: 'error' });
+      const cambiar = async (estado) => {
+        err.textContent = '';
+        try {
+          await api(`/api/admin/disputas/${id}`, { method: 'PATCH', body: JSON.stringify({ estado, resolucion: texto.value }) });
+          await cargarLista(); await abrir(id);
+        } catch (e) { err.textContent = e.message; }
+      };
+      partes.push(el('h2', {}, 'Resolver'), texto, el('p', {},
+        d.estado === 'abierta' ? el('button', { className: 'sec', onclick: () => cambiar('en_revision') }, 'Tomar (en revisión)') : null,
+        el('button', { onclick: () => cambiar('resuelta') }, 'Resolver'),
+        el('button', { className: 'peligro', onclick: () => cambiar('rechazada') }, 'Rechazar'),
+      ), err);
+    } else {
+      partes.push(el('h2', {}, 'Resolución'), el('p', {}, d.resolucion ?? '—'), el('p', { className: 'muted' }, fecha(d.resuelto_en)));
+    }
+    det.replaceChildren(...partes);
+    document.querySelectorAll('.item').forEach(n => n.classList.remove('sel'));
+  } catch (e) { det.replaceChildren(el('p', { className: 'error' }, e.message)); }
+}
+
+document.getElementById('clave').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); });
+if (clave) mostrarPanel();
+</script>
+</body>
+</html>

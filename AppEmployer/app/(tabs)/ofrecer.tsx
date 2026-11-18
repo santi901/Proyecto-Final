@@ -6,6 +6,7 @@ import {
   Dimensions,
   Linking,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -14,7 +15,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUsuario, logout as authLogout } from '../../auth';
 import { pedirUbicacion, enviarUbicacion, seguirUbicacion, type Coordenadas } from '../../lib/ubicacion';
-import { crearTrabajo, guardarPinLocal } from '../../lib/trabajos';
+import {
+  cotizarTrabajo,
+  crearTrabajo,
+  formatearFechaHora,
+  guardarPinLocal,
+  type Cotizacion,
+} from '../../lib/trabajos';
 import BotonChat from '../../components/boton-chat';
 import VistaFormulario from '../../components/vista-formulario';
 import CampoTexto from '../../components/campo-texto';
@@ -26,15 +33,63 @@ type EstadoUbicacion = 'cargando' | 'ok' | 'denegado' | 'error';
 const { width: SCREEN_W } = Dimensions.get('window');
 const PANEL_WIDTH = Math.round(SCREEN_W * 0.78);
 
+// Tienen que coincidir con el tarifario del backend (services/preciosService.js), que
+// es el que valida y pone el precio: una categoría que no exista allá da 400.
 const CATEGORIAS = ['Limpieza', 'Mudanza', 'Jardín', 'Pintura', 'Plomería', 'Otros'];
 const DIFICULTADES = ['Simple', 'Intermedio', 'Complejo'] as const;
 
-// El precio lo fija la app según la dificultad: no se negocia con el trabajador.
-const PRECIOS: Record<typeof DIFICULTADES[number], number> = {
-  Simple: 2500,
-  Intermedio: 4500,
-  Complejo: 7000,
-};
+// Sprint 6: el precio ya no está fijo en la app. Lo calcula el backend (base por
+// categoría × multiplicador por dificultad) y se pide cada vez que cambia la selección.
+
+// ----- Programación (Sprint 6) -----
+// Sin librería de date picker: días (hoy + 6) y horarios cada 30 min como chips.
+// Funciona igual en Android, iOS y web, y no suma una dependencia nativa.
+const DIAS_A_MOSTRAR = 7;
+const HORA_DESDE = 7;
+const HORA_HASTA = 22;
+// El backend pide al menos 60 min; se dejan 15 de margen por el tiempo que tarda en publicarse.
+const MIN_ANTICIPACION_MS = 75 * 60 * 1000;
+
+type Cuando = 'ahora' | 'programar';
+
+function diasDisponibles(): Date[] {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  return Array.from({ length: DIAS_A_MOSTRAR }, (_, i) => new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + i));
+}
+
+function horariosDelDia(dia: Date): Date[] {
+  const minimo = Date.now() + MIN_ANTICIPACION_MS;
+  const horarios: Date[] = [];
+  for (let h = HORA_DESDE; h <= HORA_HASTA; h++) {
+    for (const m of [0, 30]) {
+      const d = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), h, m);
+      if (d.getTime() >= minimo) horarios.push(d);
+    }
+  }
+  return horarios;
+}
+
+// Un horario elegido hace rato puede haber quedado demasiado cerca (la pantalla quedó abierta).
+function horarioSigueValido(h: Date): boolean {
+  return h.getTime() >= Date.now() + MIN_ANTICIPACION_MS;
+}
+
+function etiquetaDia(d: Date, i: number): string {
+  if (i === 0) return 'Hoy';
+  if (i === 1) return 'Mañana';
+  return formatearFechaHora(d.toISOString()).slice(0, 9);
+}
+
+const dos = (n: number) => String(n).padStart(2, '0');
+
+function ScrollViewHorizontal({ children }: { children: React.ReactNode }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      {children}
+    </ScrollView>
+  );
+}
 
 export default function OfrecerTrabajoScreen() {
   const router = useRouter();
@@ -99,24 +154,82 @@ export default function OfrecerTrabajoScreen() {
     return () => { activo = false; detenerSeguimiento?.(); };
   }, [router]);
 
+  // ----- Precio (Sprint 6): lo calcula el backend -----
+  const [cotizacion, setCotizacion] = useState<Cotizacion | null>(null);
+  const [cotizando, setCotizando] = useState(false);
+  const [errorCotizacion, setErrorCotizacion] = useState('');
+  // Solo vale la respuesta de la última cotización pedida (si el usuario cambia rápido
+  // de categoría, una respuesta vieja no pisa a la nueva).
+  const ultimaCotizacion = useRef(0);
+
+  async function pedirCotizacion(cat: number | null, dif: typeof DIFICULTADES[number] | null) {
+    setCotizacion(null);
+    setErrorCotizacion('');
+    if (cat === null || !dif) return;
+
+    const id = ++ultimaCotizacion.current;
+    setCotizando(true);
+    try {
+      const c = await cotizarTrabajo(CATEGORIAS[cat], dif);
+      if (id === ultimaCotizacion.current) setCotizacion(c);
+    } catch (e: any) {
+      if (id === ultimaCotizacion.current) setErrorCotizacion(e?.message ?? 'No pudimos calcular el precio.');
+    } finally {
+      if (id === ultimaCotizacion.current) setCotizando(false);
+    }
+  }
+
+  // Se cotiza en el handler (no en un useEffect) para no hacer setState dentro de un efecto.
+  function elegirCategoria(i: number) {
+    setCategoria(i);
+    setConfirmando(false);
+    pedirCotizacion(i, dificultad);
+  }
+  function elegirDificultad(d: typeof DIFICULTADES[number]) {
+    setDificultad(d);
+    setConfirmando(false);
+    pedirCotizacion(categoria, d);
+  }
+
+  // ----- Cuándo (Sprint 6): ahora o programado -----
+  const [cuando, setCuando] = useState<Cuando>('ahora');
+  const [diaIdx, setDiaIdx] = useState(0);
+  const [horario, setHorario] = useState<Date | null>(null);
+  const dias = diasDisponibles();
+  const horarios = horariosDelDia(dias[diaIdx]);
+
   // ----- Publicación del trabajo -----
   const [publicando, setPublicando] = useState(false);
   const [errorPublicar, setErrorPublicar] = useState('');
+  /** Paso de confirmación: muestra precio y fecha antes de publicar de verdad. */
+  const [confirmando, setConfirmando] = useState(false);
 
-  const precio = dificultad ? PRECIOS[dificultad] : null;
-
-  // Publica el trabajo (en la ubicación actual del empleador) y salta al seguimiento.
-  // El backend devuelve el PIN una sola vez, acá: se guarda en el dispositivo para
-  // poder mostrarlo en el seguimiento y en "Mis trabajos".
-  async function handleOfrecer() {
+  // Primer toque en "Ofrecer Trabajo": valida y muestra el resumen con el precio.
+  function handleOfrecer() {
     setErrorPublicar('');
 
     if (!titulo.trim()) { setErrorPublicar('Poné un título al trabajo.'); return; }
     if (categoria === null) { setErrorPublicar('Elegí una categoría.'); return; }
     if (!descripcion.trim()) { setErrorPublicar('Escribí una descripción.'); return; }
-    if (!dificultad || precio === null) { setErrorPublicar('Elegí la dificultad del trabajo.'); return; }
+    if (!dificultad) { setErrorPublicar('Elegí la dificultad del trabajo.'); return; }
+    if (!cotizacion) { setErrorPublicar(cotizando ? 'Esperá a que se calcule el precio.' : 'No pudimos calcular el precio. Volvé a elegir la dificultad.'); return; }
+    if (cuando === 'programar' && !horario) { setErrorPublicar('Elegí el día y la hora del trabajo.'); return; }
+    if (cuando === 'programar' && horario && !horarioSigueValido(horario)) {
+      setHorario(null);
+      setErrorPublicar('Ese horario ya quedó muy cerca. Elegí otro.');
+      return;
+    }
     if (!coords) { setErrorPublicar('No pudimos obtener tu ubicación. Reintentá desde el mapa.'); return; }
 
+    setConfirmando(true);
+  }
+
+  // Publica el trabajo (en la ubicación actual del empleador) y salta al seguimiento.
+  // El backend devuelve el PIN una sola vez, acá: se guarda en el dispositivo para
+  // poder mostrarlo en el seguimiento y en "Mis trabajos".
+  async function handleConfirmarPublicacion() {
+    if (categoria === null || !dificultad || !cotizacion || !coords) return;
+    setErrorPublicar('');
     setPublicando(true);
     try {
       const { trabajo, pin } = await crearTrabajo({
@@ -124,9 +237,10 @@ export default function OfrecerTrabajoScreen() {
         descripcion: descripcion.trim(),
         categoria: CATEGORIAS[categoria],
         nivelDificultad: dificultad,
-        precio,
+        precio: cotizacion.precio,
         latitud: coords.lat,
         longitud: coords.lng,
+        fechaProgramada: cuando === 'programar' && horario ? horario.toISOString() : null,
       });
 
       await guardarPinLocal(trabajo.id, pin);
@@ -135,9 +249,19 @@ export default function OfrecerTrabajoScreen() {
       setDescripcion('');
       setCategoria(null);
       setDificultad(null);
+      setCotizacion(null);
+      setCuando('ahora');
+      setHorario(null);
+      setConfirmando(false);
 
       router.push({ pathname: '/seguimiento', params: { trabajoId: trabajo.id } } as any);
     } catch (e: any) {
+      // 409 = el precio cambió en el backend desde que se cotizó: se vuelve a cotizar
+      // y el empleador tiene que confirmar de nuevo con el precio nuevo a la vista.
+      if (e?.status === 409) {
+        setConfirmando(false);
+        await pedirCotizacion(categoria, dificultad);
+      }
       setErrorPublicar(e?.message ?? 'No pudimos publicar el trabajo.');
     } finally {
       setPublicando(false);
@@ -291,7 +415,7 @@ export default function OfrecerTrabajoScreen() {
               return (
                 <Pressable
                   key={cat}
-                  onPress={() => setCategoria(i)}
+                  onPress={() => elegirCategoria(i)}
                   style={[
                     { width: 93, height: 86 },
                     // Única excepción a la sombra fina: seleccionada tiene spread 2 (más radio).
@@ -331,7 +455,7 @@ export default function OfrecerTrabajoScreen() {
                   <View key={d} className="flex-1 flex-row">
                     {idx > 0 && <View style={{ width: 1, backgroundColor: Paleta.neutro, opacity: 0.3 }} />}
                     <Pressable
-                      onPress={() => setDificultad(d)}
+                      onPress={() => elegirDificultad(d)}
                       className={`flex-1 items-center justify-center py-3 active:opacity-70 ${
                         sel ? 'bg-acento' : 'bg-white'
                       }`}>
@@ -343,12 +467,83 @@ export default function OfrecerTrabajoScreen() {
             </View>
           </View>
 
-          {/* Pago final */}
+          {/* ¿Cuándo? Ahora o programado (Sprint 6) */}
+          <Text className="text-[13px] font-nunito-semi text-principal mb-2">¿Cuándo?</Text>
+          <View style={sombra(Paleta.neutro)} className="rounded-[13px] mb-3">
+            <View className="flex-row overflow-hidden rounded-[13px] bg-white">
+              {(['ahora', 'programar'] as Cuando[]).map((c, idx) => (
+                <View key={c} className="flex-1 flex-row">
+                  {idx > 0 && <View style={{ width: 1, backgroundColor: Paleta.neutro, opacity: 0.3 }} />}
+                  <Pressable
+                    onPress={() => { setCuando(c); setConfirmando(false); }}
+                    className={`flex-1 items-center justify-center py-3 active:opacity-70 ${cuando === c ? 'bg-acento' : 'bg-white'}`}>
+                    <Text className="text-[13px] font-nunito-semi text-principal">
+                      {c === 'ahora' ? 'Lo antes posible' : 'Programar'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {cuando === 'programar' ? (
+            <View className="mb-5">
+              <ScrollViewHorizontal>
+                {dias.map((d, i) => {
+                  const sel = diaIdx === i;
+                  return (
+                    <Pressable
+                      key={d.toISOString()}
+                      onPress={() => { setDiaIdx(i); setHorario(null); setConfirmando(false); }}
+                      className={`px-3.5 py-2 rounded-full mr-2 border ${sel ? 'bg-principal border-principal' : 'bg-white border-neutro'}`}>
+                      <Text className={`text-[13px] font-nunito-semi ${sel ? 'text-white' : 'text-principal'}`}>{etiquetaDia(d, i)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollViewHorizontal>
+              {horarios.length === 0 ? (
+                <Text className="text-neutro text-xs font-nunito mt-2">No quedan horarios para este día. Elegí otro.</Text>
+              ) : (
+                <View className="flex-row flex-wrap gap-2 mt-2">
+                  {horarios.map(h => {
+                    const sel = horario?.getTime() === h.getTime();
+                    return (
+                      <Pressable
+                        key={h.toISOString()}
+                        onPress={() => { setHorario(h); setConfirmando(false); }}
+                        className={`px-3 py-1.5 rounded-lg border ${sel ? 'bg-acento border-acento' : 'bg-white border-neutro'}`}>
+                        <Text className="text-[13px] font-nunito-semi text-principal">{dos(h.getHours())}:{dos(h.getMinutes())}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+              <Text className="text-neutro text-xs font-nunito mt-2 leading-4">
+                Lo publicamos a los trabajadores una hora antes, para que alguien lo tome y llegue a tiempo.
+              </Text>
+            </View>
+          ) : (
+            <View className="mb-5" />
+          )}
+
+          {/* Pago final: lo calcula el backend (Sprint 6) */}
           <View style={sombra(Paleta.acento)} className="rounded-xl bg-white px-5 py-5 mb-5">
             <Text className="text-base font-nunito-bold text-principal mb-1">Pago final:</Text>
-            <Text className="text-2xl font-nunito-bold text-principal">
-              {precio !== null ? `$${precio}` : 'Elegí la dificultad'}
-            </Text>
+            {cotizando ? (
+              <ActivityIndicator color={Paleta.principal} style={{ alignSelf: 'flex-start' }} />
+            ) : cotizacion ? (
+              <>
+                <Text className="text-2xl font-nunito-bold text-principal">${cotizacion.precio}</Text>
+                <Text className="text-neutro text-xs font-nunito mt-1">
+                  Base {cotizacion.desglose.categoria} ${cotizacion.desglose.base} × {cotizacion.desglose.nivelDificultad}{' '}
+                  {String(cotizacion.desglose.multiplicador).replace('.', ',')}
+                </Text>
+              </>
+            ) : (
+              <Text className={`text-base font-nunito ${errorCotizacion ? 'text-error' : 'text-neutro'}`}>
+                {errorCotizacion || 'Elegí la categoría y la dificultad'}
+              </Text>
+            )}
           </View>
 
           <Pressable
@@ -363,17 +558,46 @@ export default function OfrecerTrabajoScreen() {
         ) : null}
 
         {/* Capa 2 (cont.): el botón de Ofrecer Trabajo también es de esta capa, no del
-            contenedor de datos — por eso va aparte, no pegado al rectángulo de arriba. */}
-        <Pressable
-          onPress={handleOfrecer}
-          disabled={publicando}
-          className="bg-principal rounded-xl py-4 items-center active:opacity-90">
-          {publicando ? (
-            <ActivityIndicator color={Paleta.acento} />
-          ) : (
+            contenedor de datos — por eso va aparte, no pegado al rectángulo de arriba.
+            Sprint 6: primero muestra el resumen con el precio; recién ahí se publica. */}
+        {confirmando && cotizacion ? (
+          <View style={sombra(Paleta.acento)} className="bg-white rounded-xl p-4">
+            <Text className="text-principal text-base font-nunito-bold mb-2">Confirmá antes de publicar</Text>
+            <Text className="text-neutro text-sm font-nunito leading-5">
+              {titulo.trim()} · {categoria !== null ? CATEGORIAS[categoria] : ''} · {dificultad}
+            </Text>
+            <Text className="text-neutro text-sm font-nunito leading-5 mb-3">
+              {cuando === 'programar' && horario
+                ? `Programado para el ${formatearFechaHora(horario.toISOString())}`
+                : 'Se publica ahora a los trabajadores cercanos'}
+            </Text>
+            <Text className="text-principal text-3xl font-nunito-bold mb-4">${cotizacion.precio}</Text>
+
+            <Pressable
+              onPress={handleConfirmarPublicacion}
+              disabled={publicando}
+              className="bg-principal rounded-xl py-4 items-center active:opacity-90 mb-2.5">
+              {publicando ? (
+                <ActivityIndicator color={Paleta.acento} />
+              ) : (
+                <Text className="text-acento text-base font-nunito-bold">Confirmar y publicar</Text>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={() => setConfirmando(false)}
+              disabled={publicando}
+              style={sombra(Paleta.principal, 0.75)}
+              className="bg-white rounded-xl py-4 items-center active:opacity-70">
+              <Text className="text-principal text-base font-nunito-bold">Volver a editar</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={handleOfrecer}
+            className="bg-principal rounded-xl py-4 items-center active:opacity-90">
             <Text className="text-acento text-base font-nunito-bold">Ofrecer Trabajo</Text>
-          )}
-        </Pressable>
+          </Pressable>
+        )}
       </VistaFormulario>
 
       {/* Panel de perfil (se despliega desde el costado) */}

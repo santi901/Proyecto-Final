@@ -3,29 +3,116 @@ const { generarPin, hashearPin, validarPin } = require('../utils/pin')
 const { notificarEmpleador, notificarEmpleado, notificarNuevoTrabajo } = require('../services/notificacionesService')
 const { buscarTrabajadoresDisponibles } = require('../services/matchingService')
 const { emitirFinTrabajo } = require('../realtime/socket')
-const { obtenerReputacion, actualizarReputacion } = require('../services/reputacionService')
+const { obtenerReputacion, actualizarReputacion, obtenerReputacionEmpleador } = require('../services/reputacionService')
+const { calcularPrecio, obtenerTarifario } = require('../services/preciosService')
+const {
+  MOTIVOS_CANCELACION, validarMotivo, calcularPeso, registrarCancelacion, verificarBloqueo,
+} = require('../services/cancelacionesService')
+const { ANTICIPACION_MINUTOS } = require('../jobs/activarProgramados')
 
-const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en, cancelado_por'
+const CAMPOS_PUBLICOS = 'id, titulo, descripcion, categoria, nivel_dificultad, precio, estado, latitud, longitud, creado_en, solicitud_expira_en, iniciado_en, finalizado_en, confirmado_empleado_en, confirmado_empleador_en, cancelado_por, fecha_programada, motivo_cancelacion, motivo_cancelacion_codigo'
 
-const ESTADOS_CANCELABLES = ['pendiente', 'asignado']
+// 'programado' (Sprint 6): el empleador lo puede cancelar mientras espera su fecha.
+const ESTADOS_CANCELABLES = ['programado', 'pendiente', 'asignado']
 
 const MAX_LARGO_COMENTARIO = 500
 
+// Trabajos programados: como mínimo con la misma anticipación con la que el poller
+// los publica (si no, se activarían apenas creados: para eso está el inmediato) y
+// como máximo a 30 días.
+const MIN_ANTICIPACION_MINUTOS = ANTICIPACION_MINUTOS
+const MAX_DIAS_PROGRAMACION    = 30
+const VENTANA_SOLICITUD_MIN    = 15
+const HORAS_VALIDEZ_PIN        = 24
+
 // Columnas que necesita el historial (Sprint 5): estado, fechas, duración y monto.
-const CAMPOS_HISTORIAL = 'id, titulo, categoria, estado, precio, creado_en, iniciado_en, finalizado_en, cancelado_en, cancelado_por'
+const CAMPOS_HISTORIAL = 'id, titulo, categoria, estado, precio, creado_en, iniciado_en, finalizado_en, cancelado_en, cancelado_por, fecha_programada, motivo_cancelacion'
 
 function calcularDuracionSegundos(trabajo) {
   if (!trabajo.iniciado_en || !trabajo.finalizado_en) return null
   return Math.round((new Date(trabajo.finalizado_en) - new Date(trabajo.iniciado_en)) / 1000)
 }
 
+// "13/11 a las 18:30", en hora argentina (el server puede correr en UTC).
+function formatearFechaHora(iso) {
+  return new Date(iso).toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace(', ', ' a las ')
+}
+
+function mensajeBloqueo(bloqueo, accion) {
+  return `Cancelaste varios trabajos en los últimos días, así que no podés ${accion} hasta el ${formatearFechaHora(bloqueo.hasta)}.`
+}
+
+// Valida fechaProgramada (opcional). Devuelve un Date, null si no vino, o tira { status, message }.
+function validarFechaProgramada(fechaProgramada, ahora = Date.now()) {
+  if (fechaProgramada == null || fechaProgramada === '') return null
+
+  const fecha = new Date(fechaProgramada)
+  if (typeof fechaProgramada !== 'string' || Number.isNaN(fecha.getTime())) {
+    throw { status: 400, message: 'fechaProgramada tiene que ser una fecha ISO 8601 (ej. 2026-11-20T15:30:00-03:00)' }
+  }
+  if (fecha.getTime() < ahora + MIN_ANTICIPACION_MINUTOS * 60 * 1000) {
+    throw { status: 400, message: `Un trabajo programado tiene que ser al menos ${MIN_ANTICIPACION_MINUTOS} minutos en el futuro. Para antes, publicalo como inmediato.` }
+  }
+  if (fecha.getTime() > ahora + MAX_DIAS_PROGRAMACION * 24 * 60 * 60 * 1000) {
+    throw { status: 400, message: `Se puede programar hasta ${MAX_DIAS_PROGRAMACION} días adelante` }
+  }
+  return fecha
+}
+
+// GET /api/trabajos/precios — el tarifario completo (categorías, dificultades,
+// precios base y multiplicadores) para que la app arme el formulario.
+function tarifario(_req, res) {
+  res.json(obtenerTarifario())
+}
+
+// GET /api/trabajos/cotizar?categoria=&nivelDificultad= — el precio que se va a
+// cobrar, ANTES de publicar. No guarda nada.
+function cotizarTrabajo(req, res) {
+  const { categoria, nivelDificultad } = req.query
+  try {
+    res.json({ cotizacion: calcularPrecio(categoria, nivelDificultad) })
+  } catch (error) {
+    console.error(`Cotización rechazada (categoria=${categoria}, nivelDificultad=${nivelDificultad}): ${error.message}`)
+    res.status(error.status ?? 500).json({ error: error.message ?? 'Error calculando el precio' })
+  }
+}
+
+// GET /api/trabajos/motivos-cancelacion — los motivos válidos para el rol del que pregunta.
+function motivosCancelacion(req, res) {
+  const rol = req.usuario.tipo === 'empleado' ? 'empleado' : 'empleador'
+  res.json({
+    motivos: Object.entries(MOTIVOS_CANCELACION[rol]).map(([codigo, texto]) => ({ codigo, texto })),
+  })
+}
+
 async function crearTrabajo(req, res) {
   const { id: usuarioId } = req.usuario
-  const { titulo, descripcion, categoria, nivelDificultad, precio, latitud, longitud } = req.body
+  const { titulo, descripcion, categoria, nivelDificultad, precio, latitud, longitud, fechaProgramada } = req.body
 
-  if (!titulo || !descripcion || !categoria || precio == null || latitud == null || longitud == null) {
+  if (!titulo || !descripcion || !categoria || !nivelDificultad || latitud == null || longitud == null) {
     console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): faltan campos obligatorios.`)
-    return res.status(400).json({ error: 'Faltan campos: titulo, descripcion, categoria, precio, latitud, longitud' })
+    return res.status(400).json({ error: 'Faltan campos: titulo, descripcion, categoria, nivelDificultad, latitud, longitud' })
+  }
+
+  // Sprint 6: el precio lo calcula el backend. Si la app manda el que le mostró al
+  // empleador y no coincide (cambió el tarifario mientras tanto), se rechaza para que
+  // el empleador confirme el nuevo: nunca se cobra un precio distinto del que vio.
+  let cotizacion
+  let fecha
+  try {
+    cotizacion = calcularPrecio(categoria, nivelDificultad)
+    fecha = validarFechaProgramada(fechaProgramada)
+  } catch (error) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): ${error.message}`)
+    return res.status(error.status ?? 400).json({ error: error.message })
+  }
+
+  if (precio != null && Number(precio) !== cotizacion.precio) {
+    console.error(`Creación de trabajo rechazada (usuarioId=${usuarioId}): precio ${precio} no coincide con el calculado ${cotizacion.precio}.`)
+    return res.status(409).json({ error: 'El precio se actualizó. Revisalo y confirmá de nuevo.', cotizacion })
   }
 
   // Buscar perfil del empleador
@@ -37,26 +124,39 @@ async function crearTrabajo(req, res) {
     return res.status(400).json({ error: 'Completá tu perfil antes de crear un trabajo' })
   }
 
+  // Sprint 6: consecuencia de cancelar demasiado — bloqueo temporal para publicar.
+  const bloqueo = await verificarBloqueo('empleador', perfil.id)
+  if (bloqueo.bloqueado) {
+    console.error(`Creación de trabajo rechazada (empleadorId=${perfil.id}): bloqueado por cancelaciones hasta ${bloqueo.hasta}.`)
+    return res.status(403).json({ error: mensajeBloqueo(bloqueo, 'publicar trabajos'), bloqueadoHasta: bloqueo.hasta })
+  }
+
+  const ahora = new Date()
   const pin     = generarPin()
   const pinHash = await hashearPin(pin)
-  const expira  = new Date(); expira.setHours(expira.getHours() + 24)
+  // El PIN vale 24h desde que el trabajo puede empezar: para un programado, desde
+  // su fecha (si no, uno programado a 3 días tendría el PIN vencido al llegar).
+  const expira = new Date((fecha ?? ahora).getTime() + HORAS_VALIDEZ_PIN * 60 * 60 * 1000)
 
-  // Tiempo límite para que algún candidato acepte antes de que la solicitud expire.
-  const solicitudExpira = new Date(); solicitudExpira.setMinutes(solicitudExpira.getMinutes() + 15)
+  // Inmediato → 'pendiente' con ventana de 15 min para que alguien acepte.
+  // Programado → 'programado' sin ventana: la abre el poller cuando lo activa.
+  const programado = !!fecha
+  const solicitudExpira = programado ? null : new Date(ahora.getTime() + VENTANA_SOLICITUD_MIN * 60 * 1000)
 
   const { data: trabajo, error } = await supabase
     .from('trabajos')
     .insert({
       empleador_id:         perfil.id,
       titulo, descripcion, categoria,
-      nivel_dificultad:     nivelDificultad ?? null,
-      precio,
+      nivel_dificultad:     nivelDificultad,
+      precio:               cotizacion.precio,
       latitud,
       longitud,
-      estado:               'pendiente',
+      estado:               programado ? 'programado' : 'pendiente',
+      fecha_programada:     fecha?.toISOString() ?? null,
       pin_hash:             pinHash,
       pin_expira_en:        expira.toISOString(),
-      solicitud_expira_en:  solicitudExpira.toISOString(),
+      solicitud_expira_en:  solicitudExpira?.toISOString() ?? null,
     })
     .select(CAMPOS_PUBLICOS)
     .single()
@@ -67,10 +167,11 @@ async function crearTrabajo(req, res) {
   }
 
   // PIN se retorna SOLO aquí — el empleador lo muestra al empleado al llegar
-  res.status(201).json({ trabajo, pin })
+  res.status(201).json({ trabajo, pin, cotizacion })
 
   // No se espera esta llamada: no debe demorar la respuesta ni fallar la creación del trabajo.
-  notificarNuevoTrabajo(trabajo)
+  // Un programado no se notifica ahora: lo hace activarProgramados.js cuando llega su hora.
+  if (!programado) notificarNuevoTrabajo(trabajo)
 }
 
 async function listarTrabajos(req, res) {
@@ -94,13 +195,28 @@ async function listarTrabajos(req, res) {
   // Empleado: ver trabajos disponibles. Se excluyen los 'pendiente' cuya solicitud
   // ya expiró (chequeo lazy, igual que el PIN: no hay cron que los cancele).
   const { data: trabajos, error } = await supabase
-    .from('trabajos').select(CAMPOS_PUBLICOS)
+    .from('trabajos').select(`${CAMPOS_PUBLICOS}, empleador_id`)
     .eq('estado', 'pendiente')
     .gt('solicitud_expira_en', new Date().toISOString())
     .order('creado_en', { ascending: false })
 
   if (error) return res.status(500).json({ error: 'Error listando trabajos' })
-  res.json({ trabajos })
+
+  // Sprint 6: el trabajador ve el score del empleador (lo bajan sus cancelaciones)
+  // antes de aceptar. Una consulta por empleador distinto, no por trabajo.
+  const reputaciones = await reputacionesDeEmpleadores((trabajos ?? []).map(t => t.empleador_id))
+  res.json({
+    trabajos: (trabajos ?? []).map(({ empleador_id, ...t }) => ({ ...t, empleador: { reputacion: reputaciones[empleador_id] ?? null } })),
+  })
+}
+
+// { [perfilId]: reputación } — si una falla, ese empleador queda en null y listo.
+async function reputacionesDeEmpleadores(perfilIds) {
+  const unicos = [...new Set(perfilIds.filter(Boolean))]
+  const pares = await Promise.all(unicos.map(async (id) => {
+    try { return [id, await obtenerReputacionEmpleador(id)] } catch { return [id, null] }
+  }))
+  return Object.fromEntries(pares)
 }
 
 // GET /api/trabajos/mios — a diferencia de listarTrabajos (que para un empleado
@@ -173,7 +289,14 @@ async function obtenerTrabajo(req, res) {
     }
   }
 
-  res.json({ trabajo: { ...trabajo, duracionSegundos, trabajador } })
+  // Sprint 6: y el trabajador ve el score del empleador.
+  let empleador
+  if (tipo === 'empleado') {
+    const reputaciones = await reputacionesDeEmpleadores([trabajo.empleador_id])
+    empleador = { reputacion: reputaciones[trabajo.empleador_id] ?? null }
+  }
+
+  res.json({ trabajo: { ...trabajo, duracionSegundos, trabajador, empleador } })
 }
 
 async function aceptarTrabajo(req, res) {
@@ -199,12 +322,31 @@ async function aceptarTrabajo(req, res) {
     return res.status(409).json({ error: 'La solicitud para este trabajo expiró' })
   }
 
-  const { error } = await supabase
-    .from('trabajos')
-    .update({ trabajador_id: empleado.id, estado: 'asignado' })
-    .eq('id', trabajoId)
+  // Sprint 6: consecuencia de cancelar demasiado — bloqueo temporal para aceptar.
+  const bloqueo = await verificarBloqueo('empleado', empleado.id)
+  if (bloqueo.bloqueado) {
+    console.error(`Aceptar trabajo rechazado (empleadoId=${empleado.id}): bloqueado por cancelaciones hasta ${bloqueo.hasta}.`)
+    return res.status(403).json({ error: mensajeBloqueo(bloqueo, 'aceptar trabajos'), bloqueadoHasta: bloqueo.hasta })
+  }
 
-  if (error) return res.status(500).json({ error: 'Error aceptando trabajo' })
+  // UPDATE condicional (estado sigue 'pendiente'): si dos trabajadores aceptan a la
+  // vez, solo a uno le devuelve la fila; el otro recibe 409 en vez de pisarlo.
+  // asignado_en (Sprint 6) sirve para el período de gracia al cancelar.
+  const { data: actualizados, error } = await supabase
+    .from('trabajos')
+    .update({ trabajador_id: empleado.id, estado: 'asignado', asignado_en: new Date().toISOString() })
+    .eq('id', trabajoId)
+    .eq('estado', 'pendiente')
+    .select('id')
+
+  if (error) {
+    console.error(`Error aceptando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
+    return res.status(500).json({ error: 'Error aceptando trabajo' })
+  }
+  if (!actualizados?.length) {
+    console.error(`Aceptar trabajo rechazado (trabajoId=${trabajoId}): otro trabajador lo aceptó primero.`)
+    return res.status(409).json({ error: 'El trabajo ya no está disponible' })
+  }
 
   res.json({ message: 'Trabajo aceptado. El empleador te dará el PIN para iniciar.' })
 
@@ -360,19 +502,37 @@ async function completarTrabajo(req, res) {
   }
 }
 
-// Sprint 3 — estado 'cancelado'. Solo el empleador dueño puede cancelar, y solo
-// mientras nadie empezó a trabajar de verdad (pendiente/asignado); una vez que
-// se validó el PIN (en_progreso) ya no se puede cancelar por acá.
+// Sprint 3 — estado 'cancelado'. Solo mientras nadie empezó a trabajar de verdad
+// (programado/pendiente/asignado); una vez que se validó el PIN (en_progreso) ya no
+// se puede cancelar por acá — para eso está la disputa.
+//
+// Sprint 6: el motivo es obligatorio (código de una lista cerrada + detalle libre,
+// obligatorio si el código es 'otro') y la cancelación queda registrada en la tabla
+// `cancelaciones` con un peso que baja el score de quien canceló y puede bloquearlo
+// temporalmente (ver cancelacionesService.js). Body: { motivo, detalle? }.
 async function cancelarTrabajo(req, res) {
   const { id: trabajoId } = req.params
   const { id: usuarioId, tipo } = req.usuario
-  const { motivo } = req.body ?? {}
+  const { motivo, detalle } = req.body ?? {}
+  const rol = tipo === 'empleado' ? 'empleado' : 'empleador'
+
+  let motivoValidado
+  try {
+    motivoValidado = validarMotivo(rol, motivo, detalle)
+  } catch (error) {
+    console.error(`Cancelación rechazada (usuarioId=${usuarioId}, trabajoId=${trabajoId}): ${error.message}`)
+    return res.status(error.status ?? 400).json({ error: error.message })
+  }
 
   const { data: trabajo } = await supabase
-    .from('trabajos').select('id, titulo, estado, empleador_id, trabajador_id').eq('id', trabajoId).maybeSingle()
+    .from('trabajos')
+    .select('id, titulo, estado, empleador_id, trabajador_id, asignado_en, fecha_programada')
+    .eq('id', trabajoId).maybeSingle()
 
   if (!trabajo) return res.status(404).json({ error: 'Trabajo no encontrado' })
 
+  // perfilId = empleados.id o perfiles.id de quien cancela (para la tabla de cancelaciones).
+  let perfilId
   if (tipo === 'empleado') {
     // Sprint 5: el trabajador puede bajarse de un trabajo que aceptó, pero solo antes
     // de arrancarlo (asignado). Cuenta para su tasa de cancelación (reputacionService).
@@ -386,6 +546,7 @@ async function cancelarTrabajo(req, res) {
       console.error(`Cancelación de empleado rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}'.`)
       return res.status(409).json({ error: 'Solo podés cancelar un trabajo antes de empezarlo' })
     }
+    perfilId = empleado.id
   } else {
     const { data: perfil } = await supabase
       .from('perfiles').select('id').eq('user_id', usuarioId).maybeSingle()
@@ -398,24 +559,59 @@ async function cancelarTrabajo(req, res) {
       console.error(`Cancelación rechazada (trabajoId=${trabajoId}): estado actual '${trabajo.estado}' no es cancelable.`)
       return res.status(409).json({ error: 'El trabajo ya no se puede cancelar (está en curso o finalizado)' })
     }
+    perfilId = perfil.id
   }
 
-  const { error } = await supabase
+  const ahora = new Date()
+  const peso = calcularPeso({
+    estadoPrevio:    trabajo.estado,
+    asignadoEn:      trabajo.asignado_en,
+    fechaProgramada: trabajo.fecha_programada,
+  }, ahora.getTime())
+
+  // Condicional sobre el estado leído: si en el medio el trabajador validó el PIN
+  // (pasó a en_progreso), no se cancela algo que ya arrancó.
+  const { data: actualizados, error } = await supabase
     .from('trabajos')
     .update({
-      estado: 'cancelado',
-      cancelado_por: tipo === 'empleado' ? 'empleado' : 'empleador',
-      cancelado_en: new Date().toISOString(),
-      motivo_cancelacion: motivo ?? null,
+      estado:                    'cancelado',
+      cancelado_por:             rol,
+      cancelado_en:              ahora.toISOString(),
+      motivo_cancelacion:        motivoValidado.texto,
+      motivo_cancelacion_codigo: motivoValidado.codigo,
     })
     .eq('id', trabajoId)
+    .eq('estado', trabajo.estado)
+    .select('id')
 
   if (error) {
     console.error(`Error cancelando trabajo (trabajoId=${trabajoId}): ${error.message ?? error}`)
     return res.status(500).json({ error: 'Error cancelando trabajo' })
   }
+  if (!actualizados?.length) {
+    console.error(`Cancelación rechazada (trabajoId=${trabajoId}): el estado cambió mientras se cancelaba.`)
+    return res.status(409).json({ error: 'El trabajo cambió de estado. Actualizá la pantalla e intentá de nuevo.' })
+  }
 
-  res.json({ message: 'Trabajo cancelado' })
+  await registrarCancelacion({
+    trabajoId, rol, usuarioId, perfilId,
+    estadoPrevio: trabajo.estado,
+    codigo:       motivoValidado.codigo,
+    detalle:      motivoValidado.detalle,
+    peso,
+  })
+
+  // Se le informa al que canceló cómo le afectó (el bloqueo se calcula ya contando esta).
+  const bloqueo = peso > 0 ? await verificarBloqueo(rol, perfilId) : null
+
+  res.json({
+    message: 'Trabajo cancelado',
+    penalizacion: {
+      peso,
+      penaliza: peso > 0,
+      bloqueadoHasta: bloqueo?.bloqueado ? bloqueo.hasta : null,
+    },
+  })
 
   emitirFinTrabajo(trabajoId, { estado: 'cancelado' })
 
@@ -423,14 +619,14 @@ async function cancelarTrabajo(req, res) {
     notificarEmpleador(trabajo.empleador_id, {
       tipo:    'cambio_estado',
       titulo:  'El trabajador canceló',
-      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}". Podés volver a publicarlo.`,
+      mensaje: `El trabajador ya no puede hacer "${trabajo.titulo}" (${motivoValidado.texto}). Podés volver a publicarlo.`,
       trabajoId,
     })
   } else if (trabajo.trabajador_id) {
     notificarEmpleado(trabajo.trabajador_id, {
       tipo:    'cambio_estado',
       titulo:  'Trabajo cancelado',
-      mensaje: 'El empleador canceló este trabajo.',
+      mensaje: `El empleador canceló "${trabajo.titulo}": ${motivoValidado.texto}.`,
       trabajoId,
     })
   }
@@ -596,11 +792,14 @@ async function historialTrabajos(req, res) {
     categoria:        t.categoria,
     estado:           t.estado,
     precio:           t.precio,
-    fecha:            t.finalizado_en ?? t.cancelado_en ?? t.creado_en,
+    // Un programado que todavía no pasó se muestra con la fecha para la que está agendado.
+    fecha:            t.finalizado_en ?? t.cancelado_en ?? (t.estado === 'programado' ? t.fecha_programada : null) ?? t.creado_en,
     creado_en:        t.creado_en,
     iniciado_en:      t.iniciado_en,
     finalizado_en:    t.finalizado_en,
+    fecha_programada: t.fecha_programada,
     cancelado_por:    t.cancelado_por,
+    motivo_cancelacion: t.motivo_cancelacion,
     duracionSegundos: calcularDuracionSegundos(t),
     ganancia:         t.estado === 'completado' ? Number(t.precio) || 0 : 0,
     calificacion:     calificacionPorTrabajo[t.id] ?? null,
@@ -616,6 +815,7 @@ async function historialTrabajos(req, res) {
       completados:           completados.length,
       cancelados:            trabajos.filter(t => t.estado === 'cancelado').length,
       enCurso:               trabajos.filter(t => ['asignado', 'en_progreso'].includes(t.estado)).length,
+      programados:           trabajos.filter(t => t.estado === 'programado').length,
       gananciaTotal:         completados.reduce((s, t) => s + t.ganancia, 0),
       gananciaMes:           completados.filter(t => new Date(t.fecha) >= inicioMes).reduce((s, t) => s + t.ganancia, 0),
       duracionTotalSegundos: completados.reduce((s, t) => s + (t.duracionSegundos ?? 0), 0),
@@ -627,4 +827,7 @@ module.exports = {
   crearTrabajo, listarTrabajos, misTrabajos, obtenerTrabajo,
   aceptarTrabajo, validarPinTrabajo, completarTrabajo, calificarTrabajo,
   cancelarTrabajo, obtenerCandidatos, obtenerCalificacion, historialTrabajos,
+  tarifario, cotizarTrabajo, motivosCancelacion,
+  // exportadas para poder probarlas sin levantar Express
+  validarFechaProgramada,
 }

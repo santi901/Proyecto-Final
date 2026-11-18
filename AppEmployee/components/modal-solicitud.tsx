@@ -4,6 +4,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Paleta } from '@/constants/theme';
 import { SEGUNDOS_LIMITE_POR_DEFECTO, segundosParaResponder, type Trabajo } from '../lib/trabajos';
 import { distanciaKm, formatearDistancia, type Coordenadas } from '../lib/ubicacion';
+import { formatearPuntaje } from '../lib/reputacion';
 
 type Props = {
   trabajo: Trabajo | null;
@@ -96,6 +97,23 @@ export default function ModalSolicitud({ trabajo, miUbicacion, onAceptar, onRech
                 <MaterialIcons name="place" size={18} color={Paleta.principal} />
                 <Text className="flex-1 text-principal text-sm font-nunito ml-2">
                   A {formatearDistancia(distancia)} de tu ubicación
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Sprint 6: score del empleador (5 de base; lo bajan sus cancelaciones) */}
+            {trabajo.empleador?.reputacion ? (
+              <View className="flex-row items-center mb-4">
+                <MaterialIcons
+                  name="verified-user"
+                  size={18}
+                  color={trabajo.empleador.reputacion.score >= 4 ? Paleta.exito : Paleta.error}
+                />
+                <Text className="flex-1 text-principal text-sm font-nunito ml-2">
+                  Empleador {formatearPuntaje(trabajo.empleador.reputacion.score)}/5
+                  {trabajo.empleador.reputacion.cancelaciones
+                    ? ` · ${trabajo.empleador.reputacion.cancelaciones} cancelación${trabajo.empleador.reputacion.cancelaciones === 1 ? '' : 'es'}`
+                    : ' · sin cancelaciones'}
                 </Text>
               </View>
             ) : null}

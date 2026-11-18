@@ -6,7 +6,9 @@ import { apiGet, apiPost } from '../auth';
 
 // 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
-export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// 'programado' (Sprint 6): tiene fecha futura; el backend lo pasa solo a 'pendiente'
+// una hora antes y recién ahí lo ven los trabajadores.
+export type EstadoTrabajo = 'programado' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
 
 export type TrabajadorAsignado = {
   id: string;
@@ -42,19 +44,56 @@ export type Trabajo = {
   cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`). */
   duracionSegundos?: number | null;
+  /** Para cuándo está agendado (null = inmediato). */
+  fecha_programada?: string | null;
+  /** Texto legible del motivo, si está cancelado. */
+  motivo_cancelacion?: string | null;
 };
+
+// ── Precio (Sprint 6) ─────────────────────────────────────────────────────────
+// El precio lo calcula el backend (base por categoría × multiplicador por dificultad).
+// La app pide la cotización para mostrarla ANTES de publicar y manda ese mismo precio
+// al crear; si el backend calcula otro (cambió el tarifario), responde 409 con la
+// cotización nueva y la app se la muestra al empleador para que confirme de nuevo.
+
+export type Cotizacion = {
+  precio: number;
+  moneda: string;
+  desglose: { categoria: string; nivelDificultad: string; base: number; multiplicador: number };
+};
+
+export type Tarifario = {
+  moneda: string;
+  categorias: { nombre: string; base: number }[];
+  dificultades: { nombre: string; multiplicador: number }[];
+};
+
+// GET /api/trabajos/precios — categorías y dificultades válidas, con sus valores.
+export async function obtenerTarifario(): Promise<Tarifario> {
+  return apiGet('/api/trabajos/precios');
+}
+
+// GET /api/trabajos/cotizar
+export async function cotizarTrabajo(categoria: string, nivelDificultad: string): Promise<Cotizacion> {
+  const q = `categoria=${encodeURIComponent(categoria)}&nivelDificultad=${encodeURIComponent(nivelDificultad)}`;
+  const { cotizacion } = await apiGet(`/api/trabajos/cotizar?${q}`);
+  return cotizacion;
+}
 
 // POST /api/trabajos — el PIN devuelto solo viaja en esta respuesta, no se puede
 // volver a consultar después: hay que mostrárselo al empleador en el momento.
+// `fechaProgramada` (ISO) opcional: si viene, el trabajo queda 'programado'.
 export async function crearTrabajo(datos: {
   titulo: string;
   descripcion: string;
   categoria: string;
-  nivelDificultad?: string | null;
+  nivelDificultad: string;
+  /** El precio que se le mostró al empleador (lo valida el backend). */
   precio: number;
   latitud: number;
   longitud: number;
-}): Promise<{ trabajo: Trabajo; pin: string }> {
+  fechaProgramada?: string | null;
+}): Promise<{ trabajo: Trabajo; pin: string; cotizacion: Cotizacion }> {
   return apiPost('/api/trabajos', datos);
 }
 
@@ -85,9 +124,28 @@ export async function completarTrabajo(id: string): Promise<ResultadoCompletar> 
   return apiPost(`/api/trabajos/${id}/completar`);
 }
 
-/** Cancela un trabajo `pendiente` o `asignado`. Solo el empleador dueño. */
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
-  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
+// ── Cancelación (Sprint 6) ────────────────────────────────────────────────────
+
+export type MotivoCancelacion = { codigo: string; texto: string };
+
+export type ResultadoCancelar = {
+  message: string;
+  penalizacion: { peso: number; penaliza: boolean; bloqueadoHasta: string | null };
+};
+
+// GET /api/trabajos/motivos-cancelacion — los motivos válidos para el empleador.
+export async function obtenerMotivosCancelacion(): Promise<MotivoCancelacion[]> {
+  const { motivos } = await apiGet('/api/trabajos/motivos-cancelacion');
+  return motivos;
+}
+
+/**
+ * Cancela un trabajo `programado`, `pendiente` o `asignado`. Solo el empleador dueño.
+ * El motivo es obligatorio (código de `obtenerMotivosCancelacion`); `detalle` es
+ * obligatorio si el motivo es 'otro'. Si ya había un trabajador asignado, baja el score.
+ */
+export async function cancelarTrabajo(id: string, motivo: string, detalle?: string): Promise<ResultadoCancelar> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, { motivo, ...(detalle ? { detalle } : {}) });
 }
 
 // El PIN solo viaja una vez en la respuesta de crearTrabajo (el backend guarda el hash,
@@ -119,6 +177,14 @@ export async function marcarCalificadoLocal(trabajoId: string) {
 
 export async function yaCalificadoLocal(trabajoId: string): Promise<boolean> {
   return (await AsyncStorage.getItem(CALIFICADO_KEY_PREFIX + trabajoId)) === '1';
+}
+
+// "jue 13/11 18:30" — para fechas programadas (hora local del celular).
+export function formatearFechaHora(iso: string): string {
+  const d = new Date(iso);
+  const dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return `${dias[d.getDay()]} ${dos(d.getDate())}/${dos(d.getMonth() + 1)} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
 }
 
 // "45 min", "1 h 20 min".

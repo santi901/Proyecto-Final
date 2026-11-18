@@ -15,9 +15,9 @@ Run from this `backend/` directory:
 
 There is no build step (plain CommonJS, no TypeScript/transpilation), no test suite, and no lint config in this folder.
 
-The server reads config from a `.env` file (not committed) with these keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, and optionally `REDIS_URL` (defaults to `redis://127.0.0.1:6379`; if Redis isn't reachable the app logs one warning and keeps running — see "Redis" below).
+The server reads config from a `.env` file (not committed) with these keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `PORT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`, `ADMIN_API_KEY` (Sprint 6 admin panel; without it `/admin` and `/api/admin/*` return 503), and optionally `REDIS_URL` (defaults to `redis://127.0.0.1:6379`; if Redis isn't reachable the app logs one warning and keeps running — see "Redis" below).
 
-Schema changes live as plain SQL files in `backend/migrations/`, run by hand against the Supabase project (no migration tooling/CLI wired up) — `001_trabajos_sprint3_sprint4.sql` adds the columns the cancel/reassignment/dual-confirmation flow below needs; `002_chat_evidencia_notificaciones_calificaciones.sql` creates (IF NOT EXISTS) `mensajes_chat`, `evidencias_trabajo`, `notificaciones`, `push_tokens`, `calificaciones` and the timing columns on `trabajos`. Run them in order.
+Schema changes live as plain SQL files in `backend/migrations/`, run by hand against the Supabase project (no migration tooling/CLI wired up) — `001_trabajos_sprint3_sprint4.sql` adds the columns the cancel/reassignment/dual-confirmation flow below needs; `002_chat_evidencia_notificaciones_calificaciones.sql` creates (IF NOT EXISTS) `mensajes_chat`, `evidencias_trabajo`, `notificaciones`, `push_tokens`, `calificaciones` and the timing columns on `trabajos`; `003_sprint6_cancelaciones_programados_precios_disputas.sql` adds `asignado_en`/`fecha_programada`/`activado_en`/`motivo_cancelacion_codigo` to `trabajos`, replaces the `estado` CHECK to allow `programado`, and creates `cancelaciones` (backfilled from existing cancelled jobs) and `disputas`. Run them in order — Sprint 6 code (reputation, matching) queries `cancelaciones` and fails without 003.
 
 ## Architecture
 
@@ -33,7 +33,13 @@ src/services/matchingService.js       worker matching by category/radius/availab
 src/services/notificacionesService.js logs every notification to `notificaciones`, then sends an Expo push
                                        (plain HTTP to exp.host) to the token in `push_tokens`; notificarNuevoTrabajo
 src/services/ubicacionCacheService.js ephemeral worker-location cache (Redis, best-effort)
-src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5)
+src/services/reputacionService.js     worker reputation: simple average + weighted score (Sprint 5); employer score (Sprint 6)
+src/services/preciosService.js        price = base per categoria × multiplier per dificultad, rounded to 100 (pure, Sprint 6)
+src/services/cancelacionesService.js  cancellation reasons per role, penalty weight, weekly-limit temporary block (Sprint 6)
+src/controllers/disputasController.js disputes: users report (motivo + descripcion + optional foto), admin reviews (Sprint 6)
+src/jobs/activarProgramados.js        in-process poller (1 min): programado → pendiente 60 min before fecha_programada
+src/middleware/admin.js               soloAdmin: x-admin-key header vs ADMIN_API_KEY, constant-time compare, fail-closed
+public/admin.html                     static admin panel served at GET /admin (vanilla JS, textContent only)
 src/realtime/socket.js                socket.io setup: JWT auth, per-trabajo rooms, emitirUbicacion/emitirFinTrabajo
 src/jobs/reasignarTrabajos.js         in-process poller: retries/auto-cancels 'pendiente' trabajos nobody accepted
 src/middleware/auth.js                autenticar (JWT check), soloEmpleado / soloEmpleador (role gates)
@@ -68,11 +74,19 @@ State machine driven by the `estado` column on `trabajos`: `pendiente` → (`emp
 
 `completado` requires both parties to confirm: `POST /:id/completar` (same endpoint both apps already call) sets `confirmado_empleado_en`/`confirmado_empleador_en` for whichever side calls it, and only flips `estado` to `completado` once both timestamps are set — a caller who already confirmed gets an idempotent "esperando confirmación" response instead of double-processing.
 
-`cancelado` is reachable via `POST /:id/cancelar` — by the empleador-owner from `pendiente`/`asignado`, or by the assigned empleado from `asignado` only (counts against their reputation) — or automatically by the reassignment poller above. `cancelado_por` records who (`empleador`/`empleado`/`sistema`). It's a terminal state like `completado` — not reachable once `en_progreso`.
+`cancelado` is reachable via `POST /:id/cancelar` (motivo required, see Sprint 6 below) — by the empleador-owner from `programado`/`pendiente`/`asignado`, or by the assigned empleado from `asignado` only (counts against their reputation) — or automatically by the reassignment poller above. `cancelado_por` records who (`empleador`/`empleado`/`sistema`). It's a terminal state like `completado` — not reachable once `en_progreso`.
 
 `GET /api/trabajos/historial` (both roles; must stay mounted before `/:id`) returns the caller's trabajos — taken (empleado) or published (empleador) — with `estado`, `fecha` (finalizado/cancelado/creado), `duracionSegundos`, `ganancia` (= `precio` if `completado`, else 0) and the job's `calificacion`, plus a `resumen` (counts, `gananciaTotal`, `gananciaMes`, total time). It's all derived from existing `trabajos`/`calificaciones` columns — no extra table.
 
 `GET /:id/candidatos` (empleador-owner only) exposes `matchingService.buscarTrabajadoresDisponibles` directly, for visibility into who currently matches a job without waiting for the notification cycle.
+
+### Sprint 6 — cancelaciones, programados, precios, disputas
+
+- **Precio**: the backend owns it. `crearTrabajo` requires `nivelDificultad` and computes `precio` via `preciosService.calcularPrecio`; a client-sent `precio` that differs gets 409 + the fresh `cotizacion` (so the employer never pays a price they didn't see). `GET /api/trabajos/precios` (tarifario) and `GET /api/trabajos/cotizar?categoria=&nivelDificultad=` (empleador) expose it before publishing. Categories/difficulties must match the apps' lists.
+- **Programados**: optional `fechaProgramada` (ISO, ≥60 min and ≤30 days ahead) creates the job as `programado` (no `solicitud_expira_en`, no notifications, PIN valid 24h from the scheduled time). `jobs/activarProgramados.js` flips it to `pendiente` 60 min before (conditional update on `estado`, so it's idempotent across instances) and notifies candidates; if the date passed >30 min ago (server was down) it auto-cancels as `sistema`. The employer can cancel a `programado` job (weight 0).
+- **Cancelar**: `POST /:id/cancelar` now requires `{ motivo, detalle? }` — `motivo` from `MOTIVOS_CANCELACION[rol]` (`GET /api/trabajos/motivos-cancelacion`), `detalle` mandatory for `otro`. Each person-initiated cancellation inserts a `cancelaciones` row with a weight: 0 (nobody had accepted), 0.5 (≤2 min after `asignado_en`), 1 (normal), 1.5 (scheduled job <2h away). Weights feed `tasaCancelacion` for both roles, and ≥3 weight in 7 days blocks accepting (empleado) / publishing (empleador) for 24h from the last cancellation (403 + `bloqueadoHasta`). The response includes `penalizacion`. Accept, cancel and auto-cancel updates are conditional on the previously read `estado` (race-safe).
+- **Score del empleador**: `reputacionService.obtenerReputacionEmpleador` = 5 × (1 − 0.5 × weighted cancellation rate); returned to workers as `trabajo.empleador.reputacion` in `GET /api/trabajos` and `GET /:id`.
+- **Disputas**: `POST /api/trabajos/:id/disputas` (multipart `motivo`, `descripcion` 10-1000 chars, optional `foto` ≤10MB → S3 `{trabajoId}/disputa-*.jpg`), participants only, job `asignado` or later and ≤7 days after closing, one open per user/job (409). `GET /:id/disputas` lists the caller's own. Admin API under `/api/admin/disputas` (list / detail with trabajo + evidencias + chat / `PATCH { estado, resolucion }`, transitions `abierta → en_revision → resuelta|rechazada`), notifying the reporter on each change.
 
 ### Identity verification (`verificacionController.js`)
 

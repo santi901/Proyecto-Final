@@ -59,6 +59,7 @@ export default function RootLayout() {
           <Stack.Screen name="trabajo-en-curso" options={{ headerShown: false }} />
           <Stack.Screen name="perfil" options={{ headerShown: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
+          <Stack.Screen name="reportar-problema" options={{ headerShown: false }} />
           <Stack.Screen
             name="modal"
             options={{

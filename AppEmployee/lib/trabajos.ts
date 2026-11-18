@@ -5,7 +5,18 @@ import { apiGet, apiPost } from '../auth';
 
 // 'cancelado' lo pone el empleador (POST /:id/cancelar) o, automáticamente, el poller de
 // reasignación del backend cuando nadie acepta el trabajo después de 3 reintentos.
-export type EstadoTrabajo = 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+// 'programado' (Sprint 6) nunca le llega al trabajador como oferta: el backend lo pasa a
+// 'pendiente' una hora antes de la fecha y recién ahí aparece. Está en el tipo porque
+// el historial es compartido.
+export type EstadoTrabajo = 'programado' | 'pendiente' | 'asignado' | 'en_progreso' | 'completado' | 'cancelado';
+
+/** Score del empleador (Sprint 6): arranca en 5 y lo bajan sus cancelaciones. */
+export type ReputacionEmpleador = {
+  score: number;
+  trabajosCompletados: number;
+  cancelaciones: number;
+  tasaCancelacion: number;
+};
 
 export type Trabajo = {
   id: string;
@@ -27,7 +38,34 @@ export type Trabajo = {
   cancelado_por?: 'empleado' | 'empleador' | 'sistema' | null;
   /** Solo viene en el detalle (`GET /api/trabajos/:id`): segundos entre el PIN y la finalización. */
   duracionSegundos?: number | null;
+  /** Para cuándo está agendado (null = inmediato). */
+  fecha_programada?: string | null;
+  /** Texto legible del motivo, si está cancelado. */
+  motivo_cancelacion?: string | null;
+  /** Viene en el listado y en el detalle: el score del empleador que lo publicó. */
+  empleador?: { reputacion: ReputacionEmpleador | null };
 };
+
+export type MotivoCancelacion = { codigo: string; texto: string };
+
+export type ResultadoCancelar = {
+  message: string;
+  penalizacion: { peso: number; penaliza: boolean; bloqueadoHasta: string | null };
+};
+
+// GET /api/trabajos/motivos-cancelacion — los motivos válidos para el trabajador.
+export async function obtenerMotivosCancelacion(): Promise<MotivoCancelacion[]> {
+  const { motivos } = await apiGet('/api/trabajos/motivos-cancelacion');
+  return motivos;
+}
+
+// "jue 13/11 18:30" (hora local del celular).
+export function formatearFechaHora(iso: string): string {
+  const d = new Date(iso);
+  const dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return `${dias[d.getDay()]} ${dos(d.getDate())}/${dos(d.getMonth() + 1)} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
+}
 
 /** Tiempo para responder una solicitud entrante, salvo que expire antes. */
 export const SEGUNDOS_LIMITE_POR_DEFECTO = 30;
@@ -88,10 +126,12 @@ export type ResultadoCompletar = {
 
 /**
  * El trabajador se baja de un trabajo que aceptó. Solo antes de empezarlo (`asignado`), y
- * cuenta para su tasa de cancelación: baja el score de reputación.
+ * cuenta para su tasa de cancelación: baja el score de reputación (Sprint 6: con un peso
+ * según cuándo cancela, y si cancela mucho queda bloqueado 24 h para aceptar).
+ * El motivo es obligatorio; `detalle` también si el motivo es 'otro'.
  */
-export async function cancelarTrabajo(id: string, motivo?: string): Promise<{ message: string }> {
-  return apiPost(`/api/trabajos/${id}/cancelar`, motivo ? { motivo } : {});
+export async function cancelarTrabajo(id: string, motivo: string, detalle?: string): Promise<ResultadoCancelar> {
+  return apiPost(`/api/trabajos/${id}/cancelar`, { motivo, ...(detalle ? { detalle } : {}) });
 }
 
 export async function completarTrabajo(id: string): Promise<ResultadoCompletar> {

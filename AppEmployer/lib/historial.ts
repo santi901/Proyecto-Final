@@ -18,6 +18,10 @@ export type TrabajoHistorial = {
   iniciado_en: string | null;
   finalizado_en: string | null;
   cancelado_por: 'empleado' | 'empleador' | 'sistema' | null;
+  /** Texto del motivo de cancelación (Sprint 6). */
+  motivo_cancelacion: string | null;
+  /** Para cuándo estaba/está programado (null = inmediato). */
+  fecha_programada: string | null;
   duracionSegundos: number | null;
   ganancia: number;
   calificacion: { puntaje: number; comentario: string | null } | null;
@@ -28,6 +32,7 @@ export type ResumenHistorial = {
   completados: number;
   cancelados: number;
   enCurso: number;
+  programados: number;
   gananciaTotal: number;
   gananciaMes: number;
   duracionTotalSegundos: number;

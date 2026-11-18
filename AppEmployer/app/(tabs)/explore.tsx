@@ -3,10 +3,17 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { misTrabajosPublicados, obtenerPinLocal, type EstadoTrabajo, type Trabajo } from '../../lib/trabajos';
+import {
+  formatearFechaHora,
+  misTrabajosPublicados,
+  obtenerPinLocal,
+  type EstadoTrabajo,
+  type Trabajo,
+} from '../../lib/trabajos';
 import { Paleta, sombra } from '@/constants/theme';
 
 const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
+  programado: 'Programado',
   pendiente: 'Pendiente',
   asignado: 'Asignado',
   en_progreso: 'En progreso',
@@ -16,6 +23,7 @@ const ESTADO_LABEL: Record<EstadoTrabajo, string> = {
 
 // Clases del chip de estado (fondo y texto), con los colores del design system.
 const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string; sombra?: string }> = {
+  programado: { fondo: 'bg-white', texto: 'text-principal', sombra: Paleta.principal },
   pendiente: { fondo: 'bg-fondo-suave', texto: 'text-neutro', sombra: Paleta.neutro },
   asignado: { fondo: 'bg-acento', texto: 'text-principal' },
   en_progreso: { fondo: 'bg-exito', texto: 'text-white' },
@@ -25,9 +33,12 @@ const ESTADO_CHIP: Record<EstadoTrabajo, { fondo: string; texto: string; sombra?
 
 // El PIN solo tiene sentido mostrarlo mientras el trabajo todavía no arrancó
 // (el empleado lo necesita para pasar de 'asignado' a 'en_progreso').
-const ESTADOS_CON_PIN: EstadoTrabajo[] = ['pendiente', 'asignado'];
+const ESTADOS_CON_PIN: EstadoTrabajo[] = ['programado', 'pendiente', 'asignado'];
 
 function proximoPaso(t: Trabajo): string {
+  if (t.estado === 'programado' && t.fecha_programada) {
+    return `Programado para el ${formatearFechaHora(t.fecha_programada)}. Lo publicamos una hora antes.`;
+  }
   if (t.estado === 'pendiente') {
     const vencida = !!t.solicitud_expira_en && new Date(t.solicitud_expira_en).getTime() < Date.now();
     return vencida ? 'Nadie lo aceptó a tiempo: la solicitud expiró.' : 'Esperando que un trabajador lo acepte.';

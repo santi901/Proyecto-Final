@@ -52,20 +52,25 @@ async function reintentarBusqueda(trabajo) {
 }
 
 async function cancelarPorFaltaDeCandidatos(trabajo) {
-  const { error } = await supabase
+  const { data: actualizados, error } = await supabase
     .from('trabajos')
     .update({
       estado: 'cancelado',
       cancelado_por: 'sistema',
       cancelado_en: new Date().toISOString(),
       motivo_cancelacion: 'Nadie aceptó el trabajo a tiempo tras varios reintentos',
+      motivo_cancelacion_codigo: 'sin_candidatos',
     })
     .eq('id', trabajo.id)
+    // Sprint 6: si justo alguien lo aceptó entre la consulta y este update, no se cancela.
+    .eq('estado', 'pendiente')
+    .select('id')
 
   if (error) {
     console.error(`Error auto-cancelando trabajo sin candidatos (trabajoId=${trabajo.id}): ${error.message ?? error}`)
     return
   }
+  if (!actualizados?.length) return
 
   emitirFinTrabajo(trabajo.id, { estado: 'cancelado', motivo: 'sin_candidatos' })
 

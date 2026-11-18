@@ -22,8 +22,12 @@ import {
   marcarCalificadoLocal,
   yaCalificadoLocal,
   formatearDuracion,
+  formatearFechaHora,
+  obtenerMotivosCancelacion,
+  type MotivoCancelacion,
   type Trabajo,
 } from '../lib/trabajos';
+import SelectorMotivo from '../components/selector-motivo';
 import { listarEvidencia, urlDeEvidencia, type Evidencia } from '../lib/evidencia';
 import { obtenerUbicacionTrabajador, type Coordenadas } from '../lib/ubicacion';
 import { EstrellasLectura } from '../components/tarjeta-reputacion';
@@ -118,6 +122,11 @@ export default function SeguimientoScreen() {
 
   const [confirmandoCancelar, setConfirmandoCancelar] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  // Sprint 6: cancelar pide motivo, y el backend devuelve si penalizó.
+  const [motivosCancelacion, setMotivosCancelacion] = useState<MotivoCancelacion[] | null>(null);
+  const [motivoCancelacion, setMotivoCancelacion] = useState<string | null>(null);
+  const [detalleCancelacion, setDetalleCancelacion] = useState('');
+  const [avisoPenalizacion, setAvisoPenalizacion] = useState('');
 
   const [evidencias, setEvidencias] = useState<Evidencia[] | null>(null);
 
@@ -254,16 +263,40 @@ export default function SeguimientoScreen() {
     }
   }
 
-  // Cancelar sólo se puede antes de que el trabajo arranque ('pendiente' o 'asignado');
-  // el backend lo rechaza una vez que está 'en_progreso'.
+  function abrirReporte() {
+    router.push({ pathname: '/reportar-problema', params: { trabajoId } } as any);
+  }
+
+  function abrirCancelar() {
+    setError('');
+    setConfirmandoCancelar(true);
+    if (!motivosCancelacion) {
+      obtenerMotivosCancelacion()
+        .then(setMotivosCancelacion)
+        .catch(e => setError(e?.message ?? 'No pudimos cargar los motivos.'));
+    }
+  }
+
+  // Cancelar sólo se puede antes de que el trabajo arranque (programado, pendiente o
+  // asignado); el backend lo rechaza una vez que está 'en_progreso'. Sprint 6: con motivo.
   async function handleCancelar() {
     setError('');
+    if (!motivoCancelacion) { setError('Elegí el motivo de la cancelación.'); return; }
+    if (motivoCancelacion === 'otro' && detalleCancelacion.trim().length < 5) {
+      setError('Contanos brevemente por qué lo cancelás.');
+      return;
+    }
     setCancelando(true);
     try {
-      await cancelarTrabajo(trabajoId!);
-      setTrabajo(t => (t ? { ...t, estado: 'cancelado' } : t));
+      const { penalizacion } = await cancelarTrabajo(trabajoId!, motivoCancelacion, detalleCancelacion.trim() || undefined);
+      setTrabajo(t => (t ? { ...t, estado: 'cancelado', cancelado_por: 'empleador' } : t));
       completadoRef.current = true; // terminal: no hace falta seguir refrescando
       setConfirmandoCancelar(false);
+      if (penalizacion.bloqueadoHasta) {
+        setAvisoPenalizacion(`Por cancelar varios trabajos seguidos no vas a poder publicar hasta el ${formatearFechaHora(penalizacion.bloqueadoHasta)}.`);
+      } else if (penalizacion.penaliza) {
+        setAvisoPenalizacion('Como el trabajador ya lo había aceptado, esta cancelación baja tu score.');
+      }
     } catch (e: any) {
       setError(e?.message ?? 'No pudimos cancelar el trabajo.');
     } finally {
@@ -418,6 +451,10 @@ export default function SeguimientoScreen() {
           <Text className="text-principal text-base font-nunito-bold">Ver el chat</Text>
         </Pressable>
 
+        <Pressable onPress={abrirReporte} className="py-3 items-center active:opacity-70 mb-3">
+          <Text className="text-error text-sm font-nunito-semi underline">Reportar un problema</Text>
+        </Pressable>
+
         <Pressable
           onPress={() => router.replace('/(tabs)/ofrecer' as any)}
           className="bg-principal rounded-xl py-4 items-center active:opacity-90">
@@ -430,7 +467,10 @@ export default function SeguimientoScreen() {
   const enProgreso = trabajo.estado === 'en_progreso';
   const cancelado = trabajo.estado === 'cancelado';
   // El backend sólo deja cancelar antes de que el trabajo arranque.
-  const sePuedeCancelar = trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
+  const programado = trabajo.estado === 'programado';
+  const sePuedeCancelar = programado || trabajo.estado === 'pendiente' || trabajo.estado === 'asignado';
+  // Disputa: solo si hay otra parte (alguien aceptó el trabajo).
+  const sePuedeReportar = !!trabajo.trabajador || trabajo.estado === 'asignado' || enProgreso;
   const solicitudVencida =
     trabajo.estado === 'pendiente' &&
     !!trabajo.solicitud_expira_en &&
@@ -468,6 +508,8 @@ export default function SeguimientoScreen() {
           <Text className="text-neutro text-xs font-nunito-semi uppercase tracking-wider">
             {cancelado
               ? 'Trabajo cancelado'
+              : programado
+              ? 'Trabajo programado'
               : solicitudVencida
               ? 'Ningún trabajador lo tomó a tiempo'
               : trabajo.estado === 'pendiente'
@@ -480,6 +522,20 @@ export default function SeguimientoScreen() {
 
         <Text className="text-principal text-2xl font-nunito-bold mb-1">{trabajo.titulo}</Text>
         <Text className="text-neutro text-sm font-nunito mb-5">{trabajo.descripcion}</Text>
+
+        {programado && trabajo.fecha_programada ? (
+          <View style={sombra(Paleta.acento)} className="flex-row items-center bg-white rounded-xl px-4 py-3 mb-5">
+            <MaterialIcons name="event" size={20} color={Paleta.principal} />
+            <View className="flex-1 ml-2">
+              <Text className="text-principal text-sm font-nunito-bold">
+                {formatearFechaHora(trabajo.fecha_programada)}
+              </Text>
+              <Text className="text-neutro text-xs font-nunito leading-4">
+                Una hora antes se lo mostramos a los trabajadores cercanos. Guardá el PIN de abajo.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {solicitudVencida ? (
           <View style={sombra(Paleta.neutro)} className="flex-row items-center bg-fondo-suave rounded-xl px-4 py-3 mb-5">
@@ -663,10 +719,29 @@ export default function SeguimientoScreen() {
               <Text className="text-principal text-base font-nunito-bold mb-1">
                 ¿Cancelar este trabajo?
               </Text>
-              <Text className="text-neutro text-sm font-nunito mb-4 leading-5">
+              <Text className="text-neutro text-sm font-nunito mb-3 leading-5">
                 Se da de baja la publicación y, si ya había un trabajador asignado, se le avisa.
                 No se puede deshacer.
               </Text>
+              {trabajo.estado === 'asignado' ? (
+                <Text className="text-error text-xs font-nunito mb-3 leading-4">
+                  El trabajador ya lo aceptó: cancelar ahora baja tu score, y si cancelás seguido no
+                  vas a poder publicar por 24 horas.
+                </Text>
+              ) : null}
+
+              <Text className="text-principal text-sm font-nunito-bold mb-2">¿Por qué lo cancelás?</Text>
+              <SelectorMotivo
+                motivos={motivosCancelacion}
+                valor={motivoCancelacion}
+                onCambiar={v => { setMotivoCancelacion(v); setError(''); }}
+                detalle={detalleCancelacion}
+                onDetalle={setDetalleCancelacion}
+              />
+
+              {error ? (
+                <Text className="text-error text-[13px] font-nunito text-center mb-3">{error}</Text>
+              ) : null}
 
               <Pressable
                 onPress={handleCancelar}
@@ -687,7 +762,7 @@ export default function SeguimientoScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={() => { setError(''); setConfirmandoCancelar(true); }}
+              onPress={abrirCancelar}
               className="mt-6 py-3 items-center active:opacity-70">
               <Text className="text-error text-sm font-nunito-semi underline">Cancelar trabajo</Text>
             </Pressable>
@@ -697,11 +772,29 @@ export default function SeguimientoScreen() {
         {cancelado ? (
           <View style={sombra(Paleta.neutro)} className="flex-row items-start bg-fondo-suave rounded-xl px-4 py-3 mt-2">
             <MaterialIcons name="cancel" size={18} color={Paleta.error} />
-            <Text className="flex-1 text-neutro text-xs font-nunito ml-2 leading-4">
-              Este trabajo está cancelado. Si todavía lo necesitás, publicalo de nuevo desde
-              &ldquo;Ofrecer trabajo&rdquo;.
-            </Text>
+            <View className="flex-1 ml-2">
+              <Text className="text-neutro text-xs font-nunito leading-4">
+                Este trabajo está cancelado. Si todavía lo necesitás, publicalo de nuevo desde
+                &ldquo;Ofrecer trabajo&rdquo;.
+              </Text>
+              {trabajo.motivo_cancelacion ? (
+                <Text className="text-principal text-xs font-nunito-semi mt-1 leading-4">
+                  Motivo: {trabajo.motivo_cancelacion}
+                </Text>
+              ) : null}
+              {avisoPenalizacion ? (
+                <Text className="text-error text-xs font-nunito mt-1 leading-4">{avisoPenalizacion}</Text>
+              ) : null}
+            </View>
           </View>
+        ) : null}
+
+        {/* Disputa (Sprint 6): problema con el trabajo o con el trabajador */}
+        {sePuedeReportar && !confirmandoCancelar ? (
+          <Pressable onPress={abrirReporte} className="mt-4 py-3 flex-row items-center justify-center active:opacity-70">
+            <MaterialIcons name="report-problem" size={16} color={Paleta.error} />
+            <Text className="text-error text-sm font-nunito-semi underline ml-1.5">Reportar un problema</Text>
+          </Pressable>
         ) : null}
       </ScrollView>
     </View>
